@@ -2,14 +2,67 @@ import { IconButton, LabeledButton } from '@hypothesis/frontend-shared';
 import classnames from 'classnames';
 import { useCallback, useMemo } from 'preact/hooks';
 
-import { useStoreProxy } from '../store/use-store';
+import { useSidebarStore } from '../store';
 import { withServices } from '../service-context';
 import { countHidden, countVisible } from '../helpers/thread';
 
 import Annotation from './Annotation';
+import AnnotationHeader from './Annotation/AnnotationHeader';
+import EmptyAnnotation from './Annotation/EmptyAnnotation';
 import ModerationBanner from './ModerationBanner';
 
 /** @typedef {import('../helpers/build-thread').Thread} Thread */
+
+/**
+ * Render a gutter area to the left of a thread's content with a control for
+ * expanding/collapsing the thread and a visual vertical line showing the
+ * extent of the thread.
+ *
+ * @param {object} props
+ *   @param {boolean} props.threadIsCollapsed
+ *   @param {() => void} props.onToggleReplies
+ */
+function ThreadCollapseControl({ threadIsCollapsed, onToggleReplies }) {
+  const toggleIcon = threadIsCollapsed ? 'collapsed' : 'expand-menu';
+  const toggleTitle = threadIsCollapsed ? 'Expand replies' : 'Collapse replies';
+  return (
+    <div
+      className={classnames(
+        // ThreadCards set a pointer cursor. Set cursor to auto so that
+        // hovering over non-clickable parts of this gutter area do not show a
+        // pointer.
+        'cursor-auto',
+        {
+          'bg-thread-line': !threadIsCollapsed,
+        }
+      )}
+      data-testid="thread-collapse-channel"
+    >
+      <div
+        className={classnames(
+          // Set a background color so the dashed line in the background
+          // doesn't show through the button
+          'bg-white'
+        )}
+      >
+        <IconButton
+          classes={classnames(
+            // Pull the button up a little to align horizontally with the
+            // thread/annotation's header. Override large touch targets for
+            // touch interfaces; we need to conserve space here
+            '-mt-1 touch:min-w-[auto] touch:min-h-[auto]'
+          )}
+          expanded={!threadIsCollapsed}
+          icon={toggleIcon}
+          title={toggleTitle}
+          onClick={onToggleReplies}
+          size="medium"
+          variant="light"
+        />
+      </div>
+    </div>
+  );
+}
 
 /**
  * @typedef ThreadProps
@@ -19,24 +72,23 @@ import ModerationBanner from './ModerationBanner';
 
 /**
  * A thread, which contains a single annotation at its top level, and its
- * recursively-rendered children (i.e. replies). A thread may have a parent,
- * and at any given time it may be `collapsed`.
+ * recursively-rendered children (i.e. replies).
+ *
+ * - Threads with parents (replies) may be "collapsed". Top-level threads are
+ *   never collapsed.
+ * - Any thread may be "hidden" because it does not match current filters.
+ *
+ * Each reply thread renders as a two-column "row", with a control to toggle
+ * the thread's collapsed state at left and the content for the thread and its
+ * children to the right.
+ *
+ * Top-level threads do not render a collapse control, as they are not
+ * collapsible.
  *
  * @param {ThreadProps} props
  */
 function Thread({ thread, threadsService }) {
-  // Render this thread's replies only if the thread is expanded
-  const showChildren = !thread.collapsed;
-
-  // Applied search filters will "hide" non-matching threads. If there are
-  // hidden items within this thread, provide a control to un-hide them.
-  const showHiddenToggle = countHidden(thread) > 0;
-
-  // Render a control to expand/collapse the current thread if this thread has
-  // a parent (i.e. is a reply thread)
-  const showThreadToggle = !!thread.parent;
-  const toggleIcon = thread.collapsed ? 'collapsed' : 'expand-menu';
-  const toggleTitle = thread.collapsed ? 'Expand replies' : 'Collapse replies';
+  const isReply = !!thread.parent;
 
   // If rendering child threads, only render those that have at least one
   // visible item within them—i.e. don't render empty/totally-hidden threads.
@@ -44,12 +96,20 @@ function Thread({ thread, threadsService }) {
     child => countVisible(child) > 0
   );
 
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const hasAppliedFilter = store.hasAppliedFilter();
+  const isSaving =
+    thread.annotation && store.isSavingAnnotation(thread.annotation);
+  const isEditing =
+    thread.annotation && !!store.getDraft(thread.annotation) && !isSaving;
+
   const onToggleReplies = useCallback(
     () => store.setExpanded(thread.id, !!thread.collapsed),
     [store, thread.id, thread.collapsed]
   );
+
+  const showReplyToggle =
+    !isReply && !isEditing && !hasAppliedFilter && thread.replyCount > 0;
 
   // Memoize annotation content to avoid re-rendering an annotation when content
   // in other annotations/threads change.
@@ -57,24 +117,32 @@ function Thread({ thread, threadsService }) {
     () =>
       thread.visible && (
         <>
-          {thread.annotation && (
-            <ModerationBanner annotation={thread.annotation} />
+          {thread.annotation ? (
+            <>
+              <ModerationBanner annotation={thread.annotation} />
+              <Annotation
+                annotation={thread.annotation}
+                isReply={isReply}
+                onToggleReplies={showReplyToggle ? onToggleReplies : undefined}
+                replyCount={thread.replyCount}
+                threadIsCollapsed={thread.collapsed}
+              />
+            </>
+          ) : (
+            <EmptyAnnotation
+              isReply={isReply}
+              onToggleReplies={showReplyToggle ? onToggleReplies : undefined}
+              replyCount={thread.replyCount}
+              threadIsCollapsed={thread.collapsed}
+            />
           )}
-          <Annotation
-            annotation={thread.annotation}
-            hasAppliedFilter={hasAppliedFilter}
-            isReply={!!thread.parent}
-            onToggleReplies={onToggleReplies}
-            replyCount={thread.replyCount}
-            threadIsCollapsed={thread.collapsed}
-          />
         </>
       ),
     [
-      hasAppliedFilter,
+      isReply,
       onToggleReplies,
+      showReplyToggle,
       thread.annotation,
-      thread.parent,
       thread.replyCount,
       thread.collapsed,
       thread.visible,
@@ -82,43 +150,62 @@ function Thread({ thread, threadsService }) {
   );
 
   return (
-    <section
-      className={classnames('Thread', {
-        'Thread--reply': thread.depth > 0,
-        'is-collapsed': thread.collapsed,
-      })}
-    >
-      {showThreadToggle && (
-        <div className="Thread__collapse">
-          <div className="Thread__collapse-button-container">
-            <IconButton
-              className="NonResponsiveIconButton"
-              expanded={!thread.collapsed}
-              icon={toggleIcon}
-              title={toggleTitle}
-              onClick={onToggleReplies}
-              size="medium"
-              variant="light"
-            />
-          </div>
-        </div>
+    <section className="flex" data-testid="thread-container">
+      {isReply && (
+        <ThreadCollapseControl
+          threadIsCollapsed={thread.collapsed}
+          onToggleReplies={onToggleReplies}
+        />
       )}
 
-      <div className="Thread__content">
+      <div
+        className={classnames(
+          // Set a max-width to ensure that annotation content does not exceed
+          // the width of the container
+          'grow max-w-full'
+        )}
+        data-testid="thread-content"
+      >
         {annotationContent}
 
-        {showHiddenToggle && (
-          <div className="Thread__hidden-toggle-button-container">
-            <LabeledButton onClick={() => threadsService.forceVisible(thread)}>
-              Show {countHidden(thread)} more in conversation
-            </LabeledButton>
+        {countHidden(thread) > 0 && (
+          <div className="space-y-2">
+            {
+              // Every ThreadCard should have a header of some sort representing
+              // its top-level thread. When a thread is visible, an Annotation
+              // is rendered which in turn renders an AnnotationHeader. But when
+              // a thread is hidden, Annotation is not rendered: reander a header
+              // here instead for hidden top-level threads.
+            }
+            {!thread.parent && thread.annotation && (
+              <AnnotationHeader
+                annotation={thread.annotation}
+                isEditing={isEditing}
+                replyCount={thread.replyCount}
+                threadIsCollapsed={thread.collapsed}
+              />
+            )}
+            <div>
+              <LabeledButton
+                onClick={() => threadsService.forceVisible(thread)}
+              >
+                Show {countHidden(thread)} more in conversation
+              </LabeledButton>
+            </div>
           </div>
         )}
 
-        {showChildren && (
-          <ul className="Thread__children">
+        {!thread.collapsed && (
+          <ul
+            className={classnames(
+              // Pull this list to the left to bring it closer to the left edge
+              // of the ThreadCard and give more space for nested replies' content
+              '-ml-3'
+            )}
+            data-testid="thread-children"
+          >
             {visibleChildren.map(child => (
-              <li key={child.id}>
+              <li key={child.id} className="mt-2">
                 <Thread thread={child} threadsService={threadsService} />
               </li>
             ))}
@@ -129,6 +216,4 @@ function Thread({ thread, threadsService }) {
   );
 }
 
-Thread.injectedProps = ['threadsService'];
-
-export default withServices(Thread);
+export default withServices(Thread, ['threadsService']);

@@ -1,25 +1,22 @@
-import events from '../shared/bridge-events';
-
 const ANNOTATION_COUNT_ATTR = 'data-hypothesis-annotation-count';
 
 /**
  * Update the elements in the container element with the count data attribute
- * with the new annotation count.
+ * with the new annotation count. See:
+ * https://h.readthedocs.io/projects/client/en/latest/publishers/host-page-integration/#cmdoption-arg-data-hypothesis-annotation-count
  *
  * @param {Element} rootEl - The DOM element which contains the elements that
- * display annotation count.
+ *   display annotation count.
+ * @param {import('../shared/messaging').PortRPC<'publicAnnotationCountChanged', string>} rpc - Channel for host-sidebar communication
  */
+export function annotationCounts(rootEl, rpc) {
+  rpc.on('publicAnnotationCountChanged', updateAnnotationCountElems);
 
-export default function annotationCounts(rootEl, crossframe) {
-  crossframe.on(
-    events.PUBLIC_ANNOTATION_COUNT_CHANGED,
-    updateAnnotationCountElems
-  );
-
+  /** @param {number} newCount */
   function updateAnnotationCountElems(newCount) {
     const elems = rootEl.querySelectorAll('[' + ANNOTATION_COUNT_ATTR + ']');
-    Array.from(elems).forEach(function (elem) {
-      elem.textContent = newCount;
+    Array.from(elems).forEach(elem => {
+      elem.textContent = newCount.toString();
     });
   }
 }

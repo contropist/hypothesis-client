@@ -1,12 +1,11 @@
 import { mount } from 'enzyme';
 
-import LoginPromptPanel from '../LoginPromptPanel';
-import { $imports } from '../LoginPromptPanel';
+import LoginPromptPanel, { $imports } from '../LoginPromptPanel';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
-describe('LoginPromptPanel', function () {
+describe('LoginPromptPanel', () => {
   let fakeOnLogin;
   let fakeOnSignUp;
 
@@ -32,7 +31,7 @@ describe('LoginPromptPanel', function () {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      '../store': { useSidebarStore: () => fakeStore },
     });
   });
 

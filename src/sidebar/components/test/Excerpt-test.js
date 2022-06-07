@@ -1,8 +1,7 @@
 import { mount } from 'enzyme';
 import { act } from 'preact/test-utils';
 
-import Excerpt from '../Excerpt';
-import { $imports } from '../Excerpt';
+import Excerpt, { $imports } from '../Excerpt';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
 
@@ -39,7 +38,9 @@ describe('Excerpt', () => {
     document.body.appendChild(container);
 
     $imports.$mock({
-      '../util/observe-element-size': fakeObserveElementSize,
+      '../util/observe-element-size': {
+        observeElementSize: fakeObserveElementSize,
+      },
     });
   });
 
@@ -49,12 +50,14 @@ describe('Excerpt', () => {
   });
 
   function getExcerptHeight(wrapper) {
-    return wrapper.find('.Excerpt').prop('style')['max-height'];
+    return wrapper.find('[data-testid="excerpt-container"]').prop('style')[
+      'max-height'
+    ];
   }
 
   it('renders content in container', () => {
     const wrapper = createExcerpt();
-    const contentEl = wrapper.find('.Excerpt__content');
+    const contentEl = wrapper.find('[data-testid="excerpt-content"]');
     assert.include(contentEl.html(), 'default content');
   });
 
@@ -108,7 +111,7 @@ describe('Excerpt', () => {
   it('calls `onToggleCollapsed` when user clicks in bottom area to expand excerpt', () => {
     const onToggleCollapsed = sinon.stub();
     const wrapper = createExcerpt({ onToggleCollapsed }, TALL_DIV);
-    const control = wrapper.find('.Excerpt__shadow');
+    const control = wrapper.find('[data-testid="excerpt-expand"]');
     assert.equal(getExcerptHeight(wrapper), 40);
     control.simulate('click');
     assert.called(onToggleCollapsed);

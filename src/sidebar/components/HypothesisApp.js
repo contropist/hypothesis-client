@@ -1,14 +1,13 @@
 import classnames from 'classnames';
 import { useEffect, useMemo } from 'preact/hooks';
 
-import bridgeEvents from '../../shared/bridge-events';
 import { confirm } from '../../shared/prompts';
-import serviceConfig from '../config/service-config';
-import { useStoreProxy } from '../store/use-store';
+import { serviceConfig } from '../config/service-config';
 import { parseAccountID } from '../helpers/account-id';
 import { shouldAutoDisplayTutorial } from '../helpers/session';
 import { applyTheme } from '../helpers/theme';
 import { withServices } from '../service-context';
+import { useSidebarStore } from '../store';
 
 import AnnotationView from './AnnotationView';
 import SidebarView from './SidebarView';
@@ -22,18 +21,19 @@ import TopBar from './TopBar';
 
 /**
  * @typedef {import('../../types/api').Profile} Profile
- * @typedef {import('../../types/config').MergedConfig} MergedConfig
- * @typedef {import('../../shared/bridge').default} Bridge
+ * @typedef {import('../../types/config').SidebarSettings} SidebarSettings
+ * @typedef {import('./UserMenu').AuthState} AuthState
  */
 
 /**
  * Return the user's authentication status from their profile.
  *
  * @param {Profile} profile - The profile object from the API.
+ * @return {AuthState}
  */
 function authStateFromProfile(profile) {
   const parsed = parseAccountID(profile.userid);
-  if (parsed) {
+  if (parsed && profile.userid) {
     let displayName = parsed.username;
     if (profile.user_info && profile.user_info.display_name) {
       displayName = profile.user_info.display_name;
@@ -43,7 +43,6 @@ function authStateFromProfile(profile) {
       displayName,
       userid: profile.userid,
       username: parsed.username,
-      provider: parsed.provider,
     };
   } else {
     return { status: 'logged-out' };
@@ -53,9 +52,9 @@ function authStateFromProfile(profile) {
 /**
  * @typedef HypothesisAppProps
  * @prop {import('../services/auth').AuthService} auth
- * @prop {Bridge} bridge
- * @prop {MergedConfig} settings
- * @prop {Object} session
+ * @prop {import('../services/frame-sync').FrameSyncService} frameSync
+ * @prop {SidebarSettings} settings
+ * @prop {import('../services/session').SessionService} session
  * @prop {import('../services/toast-messenger').ToastMessengerService} toastMessenger
  */
 
@@ -67,12 +66,13 @@ function authStateFromProfile(profile) {
  *
  * @param {HypothesisAppProps} props
  */
-function HypothesisApp({ auth, bridge, settings, session, toastMessenger }) {
-  const store = useStoreProxy();
+function HypothesisApp({ auth, frameSync, settings, session, toastMessenger }) {
+  const store = useSidebarStore();
   const hasFetchedProfile = store.hasFetchedProfile();
   const profile = store.profile();
   const route = store.route();
 
+  /** @type {AuthState} */
   const authState = useMemo(() => {
     if (!hasFetchedProfile) {
       return { status: 'unknown' };
@@ -97,7 +97,7 @@ function HypothesisApp({ auth, bridge, settings, session, toastMessenger }) {
   const login = async () => {
     if (serviceConfig(settings)) {
       // Let the host page handle the login request
-      bridge.call(bridgeEvents.LOGIN_REQUESTED);
+      frameSync.notifyHost('loginRequested');
       return;
     }
 
@@ -115,7 +115,7 @@ function HypothesisApp({ auth, bridge, settings, session, toastMessenger }) {
   const signUp = () => {
     if (serviceConfig(settings)) {
       // Let the host page handle the signup request
-      bridge.call(bridgeEvents.SIGNUP_REQUESTED);
+      frameSync.notifyHost('signupRequested');
       return;
     }
     window.open(store.getLink('signup'));
@@ -155,7 +155,7 @@ function HypothesisApp({ auth, bridge, settings, session, toastMessenger }) {
     store.discardAllDrafts();
 
     if (serviceConfig(settings)) {
-      bridge.call(bridgeEvents.LOGOUT_REQUESTED);
+      frameSync.notifyHost('logoutRequested');
       return;
     }
 
@@ -164,10 +164,21 @@ function HypothesisApp({ auth, bridge, settings, session, toastMessenger }) {
 
   return (
     <div
-      className={classnames('HypothesisApp', 'js-thread-list-scroll-root', {
-        'theme-clean': isThemeClean,
-        'HypothesisApp--notebook': route === 'notebook',
-      })}
+      className={classnames(
+        'h-full min-h-full overflow-scroll',
+        // Precise padding to align with annotation cards in content
+        // Larger padding on bottom for wide screens
+        'lg:pb-16 bg-grey-2',
+        'js-thread-list-scroll-root',
+        {
+          'theme-clean': isThemeClean,
+          // Make room at top for the TopBar (40px) plus custom padding (9px)
+          // but not in the Notebook, which doesn't use the TopBar
+          'pt-[49px]': route !== 'notebook',
+          'p-4 lg:p-12': route === 'notebook',
+        }
+      )}
+      data-testid="hypothesis-app"
       style={backgroundStyle}
     >
       {route !== 'notebook' && (
@@ -179,9 +190,9 @@ function HypothesisApp({ auth, bridge, settings, session, toastMessenger }) {
           isSidebar={isSidebar}
         />
       )}
-      <div className="HypothesisApp__content">
+      <div className="container">
         <ToastMessages />
-        <HelpPanel auth={authState} />
+        <HelpPanel auth={authState.status === 'logged-in' ? authState : {}} />
         <ShareAnnotationsPanel />
 
         {route && (
@@ -199,12 +210,10 @@ function HypothesisApp({ auth, bridge, settings, session, toastMessenger }) {
   );
 }
 
-HypothesisApp.injectedProps = [
+export default withServices(HypothesisApp, [
   'auth',
-  'bridge',
+  'frameSync',
   'session',
   'settings',
   'toastMessenger',
-];
-
-export default withServices(HypothesisApp);
+]);

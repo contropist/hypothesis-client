@@ -1,11 +1,5 @@
 import { useEffect, useRef, useReducer } from 'preact/hooks';
 
-import { useService } from '../service-context';
-
-/** @typedef {import("redux").Store} Store */
-
-/** @typedef {import("./index").SidebarStore} SidebarStore */
-
 /**
  * Result of a cached store selector method call.
  */
@@ -13,8 +7,8 @@ class CacheEntry {
   /**
    * @param {string} name - Method name
    * @param {Function} method - Method implementation
-   * @param {any[]} args - Arguments to the selector
-   * @param {any} result - Result of the invocation
+   * @param {unknown[]} args - Arguments to the selector
+   * @param {unknown} result - Result of the invocation
    */
   constructor(name, method, args, result) {
     this.name = name;
@@ -25,7 +19,7 @@ class CacheEntry {
 
   /**
    * @param {string} name
-   * @param {any[]} args
+   * @param {unknown[]} args
    */
   matches(name, args) {
     return (
@@ -35,18 +29,26 @@ class CacheEntry {
 }
 
 /**
- * Return a wrapper around the `store` service that UI components can use to
- * extract data from the store and call actions on it.
+ * Return a wrapper around a store that UI components can use to read from and
+ * modify data in it.
  *
- * Unlike using the `store` service directly, the wrapper tracks what data from
- * the store the current component uses, via selector methods, and re-renders the
- * component when that data changes.
+ * Unlike using the store directly, the wrapper tracks what data from
+ * the store the current component uses, by recording calls to selector methods,
+ * and re-renders the components when the results of those calls change.
  *
  * The returned wrapper has the same API as the store itself.
  *
  * @example
+ *   // A hook which encapsulates looking up the specific store instance,
+ *   // eg. via `useContext`.
+ *   function useAppStore() {
+ *     // Get the store from somewhere, eg. a prop or context.
+ *     const appStore = ...;
+ *     return useStore(appStore);
+ *   }
+ *
  *   function MyComponent() {
- *     const store = useStoreProxy();
+ *     const store = useAppStore();
  *     const currentUser = store.currentUser();
  *
  *     return (
@@ -57,11 +59,11 @@ class CacheEntry {
  *     );
  *   }
  *
- * @return {SidebarStore}
+ * @template {import('./create-store').Store<unknown, unknown, unknown>} Store
+ * @param {Store} store - The store to wrap
+ * @return {Store} - A proxy with the same API as `store`
  */
-export function useStoreProxy() {
-  const store = useService('store');
-
+export function useStore(store) {
   // Hack to trigger a component re-render.
   const [, forceUpdate] = useReducer(x => x + 1, 0);
 
@@ -75,14 +77,16 @@ export function useStoreProxy() {
   const cache = cacheRef.current;
 
   // Create the wrapper around the store.
-  const proxy = useRef(/** @type {SidebarStore|null} */ (null));
+  const proxy = useRef(/** @type {Store|null} */ (null));
   if (!proxy.current) {
     // Cached method wrappers.
-    const wrappedMethods = {};
+    /** @type {Map<string, Function>} */
+    const wrappedMethods = new Map();
 
     /**
-     * @param {typeof store} store
-     * @param {string} prop
+     * @template {Store} StoreType
+     * @param {StoreType} store
+     * @param {keyof StoreType & string} prop
      */
     const get = (store, prop) => {
       const method = store[prop];
@@ -91,12 +95,13 @@ export function useStoreProxy() {
       }
 
       // Check for pre-existing method wrapper.
-      let wrapped = wrappedMethods[prop];
+      let wrapped = wrappedMethods.get(prop);
       if (wrapped) {
         return wrapped;
       }
 
       // Create method wrapper.
+      /** @param {unknown[]} args */
       wrapped = (...args) => {
         const cacheEntry = cache.find(entry => entry.matches(prop, args));
         if (cacheEntry) {
@@ -114,7 +119,7 @@ export function useStoreProxy() {
         }
         return result;
       };
-      wrappedMethods[prop] = wrapped;
+      wrappedMethods.set(prop, wrapped);
 
       return wrapped;
     };
@@ -144,5 +149,5 @@ export function useStoreProxy() {
     return cleanup;
   }, [cache, store]);
 
-  return proxy.current;
+  return /** @type {Store} */ (proxy.current);
 }

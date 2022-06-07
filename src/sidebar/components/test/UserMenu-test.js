@@ -1,15 +1,12 @@
 import { mount } from 'enzyme';
 import { act } from 'preact/test-utils';
 
-import bridgeEvents from '../../../shared/bridge-events';
-import UserMenu from '../UserMenu';
-import { $imports } from '../UserMenu';
-
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
+import UserMenu, { $imports } from '../UserMenu';
 
 describe('UserMenu', () => {
   let fakeAuth;
-  let fakeBridge;
+  let fakeFrameSync;
   let fakeIsThirdPartyUser;
   let fakeOnLogout;
   let fakeServiceConfig;
@@ -20,7 +17,7 @@ describe('UserMenu', () => {
     return mount(
       <UserMenu
         auth={fakeAuth}
-        bridge={fakeBridge}
+        frameSync={fakeFrameSync}
         onLogout={fakeOnLogout}
         settings={fakeSettings}
       />
@@ -40,7 +37,7 @@ describe('UserMenu', () => {
       userid: 'acct:eleanorFishtail@hypothes.is',
       username: 'eleanorFishy',
     };
-    fakeBridge = { call: sinon.stub() };
+    fakeFrameSync = { notifyHost: sinon.stub() };
     fakeIsThirdPartyUser = sinon.stub();
     fakeOnLogout = sinon.stub();
     fakeServiceConfig = sinon.stub();
@@ -49,7 +46,6 @@ describe('UserMenu', () => {
       defaultAuthority: sinon.stub().returns('hypothes.is'),
       focusedGroupId: sinon.stub().returns('mygroup'),
       getLink: sinon.stub(),
-      isFeatureEnabled: sinon.stub().returns(false),
     };
 
     $imports.$mock(mockImportedComponents());
@@ -57,8 +53,8 @@ describe('UserMenu', () => {
       '../helpers/account-id': {
         isThirdPartyUser: fakeIsThirdPartyUser,
       },
-      '../config/service-config': fakeServiceConfig,
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      '../config/service-config': { serviceConfig: fakeServiceConfig },
+      '../store': { useSidebarStore: () => fakeStore },
     });
   });
 
@@ -147,8 +143,8 @@ describe('UserMenu', () => {
 
         onProfileSelected();
 
-        assert.equal(fakeBridge.call.callCount, 1);
-        assert.calledWith(fakeBridge.call, bridgeEvents.PROFILE_REQUESTED);
+        assert.equal(fakeFrameSync.notifyHost.callCount, 1);
+        assert.calledWith(fakeFrameSync.notifyHost, 'profileRequested');
       });
 
       it('should not fire profile event for first-party user', () => {
@@ -159,7 +155,7 @@ describe('UserMenu', () => {
 
         onProfileSelected();
 
-        assert.equal(fakeBridge.call.callCount, 0);
+        assert.equal(fakeFrameSync.notifyHost.callCount, 0);
       });
     });
   });
@@ -186,50 +182,38 @@ describe('UserMenu', () => {
   });
 
   describe('open notebook item', () => {
-    context('notebook feature is enabled', () => {
-      it('includes the open notebook item', () => {
-        fakeStore.isFeatureEnabled.withArgs('notebook_launch').returns(true);
-        const wrapper = createUserMenu();
+    it('includes the open notebook item', () => {
+      const wrapper = createUserMenu();
 
-        const openNotebookItem = findMenuItem(wrapper, 'Open notebook');
-        assert.isTrue(openNotebookItem.exists());
-      });
-
-      it('triggers a message when open-notebook item is clicked', () => {
-        fakeStore.isFeatureEnabled.withArgs('notebook_launch').returns(true);
-        const wrapper = createUserMenu();
-
-        const openNotebookItem = findMenuItem(wrapper, 'Open notebook');
-        openNotebookItem.props().onClick();
-        assert.calledOnce(fakeBridge.call);
-        assert.calledWith(fakeBridge.call, 'openNotebook', 'mygroup');
-      });
-
-      it('opens the notebook and closes itself when `n` is typed', () => {
-        const wrapper = createUserMenu();
-        // Make the menu "open"
-        act(() => {
-          wrapper.find('Menu').props().onOpenChanged(true);
-        });
-        wrapper.update();
-        assert.isTrue(wrapper.find('Menu').props().open);
-
-        wrapper.find('.UserMenu').simulate('keydown', { key: 'n' });
-        assert.calledOnce(fakeBridge.call);
-        assert.calledWith(fakeBridge.call, 'openNotebook', 'mygroup');
-        // Now the menu is "closed" again
-        assert.isFalse(wrapper.find('Menu').props().open);
-      });
+      const openNotebookItem = findMenuItem(wrapper, 'Open notebook');
+      assert.isTrue(openNotebookItem.exists());
     });
 
-    context('notebook feature is not enabled', () => {
-      it('does not include the open notebook item', () => {
-        fakeStore.isFeatureEnabled.withArgs('notebook_launch').returns(false);
-        const wrapper = createUserMenu();
+    it('triggers a message when open-notebook item is clicked', () => {
+      const wrapper = createUserMenu();
 
-        const openNotebookItem = findMenuItem(wrapper, 'Open notebook');
-        assert.isFalse(openNotebookItem.exists());
+      const openNotebookItem = findMenuItem(wrapper, 'Open notebook');
+      openNotebookItem.props().onClick();
+      assert.calledOnce(fakeFrameSync.notifyHost);
+      assert.calledWith(fakeFrameSync.notifyHost, 'openNotebook', 'mygroup');
+    });
+
+    it('opens the notebook and closes itself when `n` is typed', () => {
+      const wrapper = createUserMenu();
+      // Make the menu "open"
+      act(() => {
+        wrapper.find('Menu').props().onOpenChanged(true);
       });
+      wrapper.update();
+      assert.isTrue(wrapper.find('Menu').props().open);
+
+      wrapper
+        .find('[data-testid="user-menu"]')
+        .simulate('keydown', { key: 'n' });
+      assert.calledOnce(fakeFrameSync.notifyHost);
+      assert.calledWith(fakeFrameSync.notifyHost, 'openNotebook', 'mygroup');
+      // Now the menu is "closed" again
+      assert.isFalse(wrapper.find('Menu').props().open);
     });
   });
 
@@ -242,15 +226,13 @@ describe('UserMenu', () => {
         expected: true,
       },
       {
-        it:
-          'should be present for first-party user if service supports `onLogoutRequest`',
+        it: 'should be present for first-party user if service supports `onLogoutRequest`',
         isThirdParty: false,
         serviceConfigReturns: { onLogoutRequestProvided: true },
         expected: true,
       },
       {
-        it:
-          'should be present for first-party user if service does not support `onLogoutRequest`',
+        it: 'should be present for first-party user if service does not support `onLogoutRequest`',
         isThirdParty: false,
         serviceConfigReturns: { onLogoutRequestProvided: false },
         expected: true,
@@ -262,15 +244,13 @@ describe('UserMenu', () => {
         expected: false,
       },
       {
-        it:
-          'should be present for third-party user if service supports `onLogoutRequest`',
+        it: 'should be present for third-party user if service supports `onLogoutRequest`',
         isThirdParty: true,
         serviceConfigReturns: { onLogoutRequestProvided: true },
         expected: true,
       },
       {
-        it:
-          'should be absent for third-party user if `onLogoutRequest` not supported',
+        it: 'should be absent for third-party user if `onLogoutRequest` not supported',
         isThirdParty: true,
         serviceConfigReturns: { onLogoutRequestProvided: false },
         expected: false,

@@ -1,26 +1,26 @@
-import * as util from '../util';
-
-import { storeModule } from '../create-store';
+import { createStoreModule, makeAction } from '../create-store';
 
 /**
  * This module defines actions and state related to the display mode of the
  * sidebar.
  */
 
-function init() {
-  return {
-    // Has the sidebar ever been opened? NB: This is not necessarily the
-    // current state of the sidebar, but tracks whether it has ever been open
-    sidebarHasOpened: false,
-    visibleHighlights: false,
-  };
-}
+const initialState = {
+  /**
+   * Has the sidebar ever been opened? NB: This is not necessarily the
+   * current state of the sidebar, but tracks whether it has ever been open
+   */
+  sidebarHasOpened: false,
+};
 
-const update = {
-  SET_HIGHLIGHTS_VISIBLE: function (state, action) {
-    return { visibleHighlights: action.visible };
-  },
-  SET_SIDEBAR_OPENED: (state, action) => {
+/** @typedef {typeof initialState} State */
+
+const reducers = {
+  /**
+   * @param {State} state
+   * @param {{ opened: boolean }} action
+   */
+  SET_SIDEBAR_OPENED(state, action) {
     if (action.opened === true) {
       // If the sidebar is open, track that it has ever been opened
       return { sidebarHasOpened: true };
@@ -30,37 +30,22 @@ const update = {
   },
 };
 
-const actions = util.actionTypes(update);
-
-// Action creators
-
-/**
- * Sets whether annotation highlights in connected documents are shown
- * or not.
- */
-function setShowHighlights(show) {
-  return { type: actions.SET_HIGHLIGHTS_VISIBLE, visible: show };
-}
-
 /**
  * @param {boolean} opened - If the sidebar is open
  */
 function setSidebarOpened(opened) {
-  return { type: actions.SET_SIDEBAR_OPENED, opened };
+  return makeAction(reducers, 'SET_SIDEBAR_OPENED', { opened });
 }
 
-// Selectors
-
+/** @param {State} state */
 function hasSidebarOpened(state) {
   return state.sidebarHasOpened;
 }
 
-export default storeModule({
-  init: init,
+export const viewerModule = createStoreModule(initialState, {
   namespace: 'viewer',
-  update: update,
-  actions: {
-    setShowHighlights,
+  reducers,
+  actionCreators: {
     setSidebarOpened,
   },
   selectors: {

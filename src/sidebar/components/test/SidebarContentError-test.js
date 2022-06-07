@@ -4,7 +4,7 @@ import SidebarContentError from '../SidebarContentError';
 import { $imports } from '../SidebarContentError';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
 describe('SidebarContentError', () => {
   let fakeStore;
@@ -25,7 +25,7 @@ describe('SidebarContentError', () => {
       isLoggedIn: sinon.stub().returns(true),
     };
     $imports.$mock({
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      '../store': { useSidebarStore: () => fakeStore },
     });
     $imports.$mock(mockImportedComponents());
   });

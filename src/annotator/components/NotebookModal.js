@@ -1,12 +1,22 @@
-import { LabeledButton } from '@hypothesis/frontend-shared';
+import { IconButton } from '@hypothesis/frontend-shared';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import classnames from 'classnames';
 
-import { createSidebarConfig } from '../config/sidebar';
+import { addConfigFragment } from '../../shared/config-fragment';
+import { createAppConfig } from '../config/app';
+
+/**
+ * Configuration used to launch the notebook application.
+ *
+ * This includes the URL for the iframe and configuration to pass to the
+ * application on launch.
+ *
+ * @typedef {{ notebookAppUrl: string } & Record<string, unknown>} NotebookConfig
+ */
 
 /**
  * @typedef NotebookIframeProps
- * @prop {Record<string, any>} config
+ * @prop {NotebookConfig} config
  * @prop {string} groupId
  */
 
@@ -16,16 +26,17 @@ import { createSidebarConfig } from '../config/sidebar';
  * @param {NotebookIframeProps} props
  */
 function NotebookIframe({ config, groupId }) {
-  const notebookConfig = createSidebarConfig(config);
-  // Explicity set the "focused" group
-  notebookConfig.group = groupId;
-  const configParam = encodeURIComponent(JSON.stringify(notebookConfig));
-  const notebookAppSrc = `${config.notebookAppUrl}#config=${configParam}`;
+  const notebookAppSrc = addConfigFragment(config.notebookAppUrl, {
+    ...createAppConfig(config.notebookAppUrl, config),
+
+    // Explicity set the "focused" group
+    group: groupId,
+  });
 
   return (
     <iframe
       title={'Hypothesis annotation notebook'}
-      className="Notebook__iframe"
+      className="h-full w-full border-0"
       // Enable media in annotations to be shown fullscreen
       allowFullScreen
       src={notebookAppSrc}
@@ -33,10 +44,12 @@ function NotebookIframe({ config, groupId }) {
   );
 }
 
+/** @typedef {import('../util/emitter').Emitter} Emitter */
+
 /**
  * @typedef NotebookModalProps
  * @prop {import('../util/emitter').EventBus} eventBus
- * @prop {Record<string, any>} config
+ * @prop {NotebookConfig} config
  */
 
 /**
@@ -53,9 +66,7 @@ export default function NotebookModal({ eventBus, config }) {
   const [isHidden, setIsHidden] = useState(true);
   const [groupId, setGroupId] = useState(/** @type {string|null} */ (null));
   const originalDocumentOverflowStyle = useRef('');
-  const emitter = useRef(
-    /** @type {ReturnType<eventBus['createEmitter']>|null} */ (null)
-  );
+  const emitterRef = useRef(/** @type {Emitter|null} */ (null));
 
   // Stores the original overflow CSS property of document.body and reset it
   // when the component is destroyed
@@ -78,41 +89,46 @@ export default function NotebookModal({ eventBus, config }) {
   }, [isHidden]);
 
   useEffect(() => {
-    emitter.current = eventBus.createEmitter();
-    emitter.current.subscribe('openNotebook', (
-      /** @type {string} */ groupId
-    ) => {
+    const emitter = eventBus.createEmitter();
+    emitter.subscribe('openNotebook', (/** @type {string} */ groupId) => {
       setIsHidden(false);
       setIframeKey(iframeKey => iframeKey + 1);
       setGroupId(groupId);
     });
+    emitterRef.current = emitter;
 
     return () => {
-      emitter.current.destroy();
+      emitter.destroy();
     };
   }, [eventBus]);
 
   const onClose = () => {
     setIsHidden(true);
-    emitter.current.publish('closeNotebook');
+    emitterRef.current?.publish('closeNotebook');
   };
 
+  if (groupId === null) {
+    return null;
+  }
+
   return (
-    <div className={classnames('Notebook__outer', { 'is-hidden': isHidden })}>
-      <div className="Notebook__inner">
-        <div className="Notebook__close-button-container">
-          <LabeledButton
+    <div
+      className={classnames(
+        'fixed z-max top-0 left-0 right-0 bottom-0 p-3 bg-black/50',
+        { hidden: isHidden }
+      )}
+      data-testid="notebook-outer"
+    >
+      <div className="relative w-full h-full" data-testid="notebook-inner">
+        <div className="absolute right-0 text-xl m-3">
+          <IconButton
             icon="cancel"
             title="Close the Notebook"
             onClick={onClose}
             variant="dark"
-          >
-            Close
-          </LabeledButton>
+          />
         </div>
-        {groupId !== null && (
-          <NotebookIframe key={iframeKey} config={config} groupId={groupId} />
-        )}
+        <NotebookIframe key={iframeKey} config={config} groupId={groupId} />
       </div>
     </div>
   );

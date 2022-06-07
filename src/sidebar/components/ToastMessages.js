@@ -1,7 +1,7 @@
 import classnames from 'classnames';
-import { SvgIcon } from '@hypothesis/frontend-shared';
+import { Card, Icon, Link } from '@hypothesis/frontend-shared';
 
-import { useStoreProxy } from '../store/use-store';
+import { useSidebarStore } from '../store';
 import { withServices } from '../service-context';
 
 /**
@@ -11,20 +11,26 @@ import { withServices } from '../service-context';
 /**
  * @typedef ToastMessageProps
  * @prop {ToastMessage} message - The message object to render
- * @prop {(id: string) => any} onDismiss
+ * @prop {(id: string) => void} onDismiss
  */
 
 /**
- * An individual toast message—a brief and transient success or error message.
- * The message may be dismissed by clicking on it.
+ * An individual toast message: a brief and transient success or error message.
+ * The message may be dismissed by clicking on it. `visuallyHidden` toast
+ * messages will not be visible but are still available to screen readers.
+ *
  * Otherwise, the `toastMessenger` service handles removing messages after a
  * certain amount of time.
  *
  * @param {ToastMessageProps} props
  */
 function ToastMessage({ message, onDismiss }) {
-  // Capitalize the message type for prepending
-  const prefix = message.type.charAt(0).toUpperCase() + message.type.slice(1);
+  // Capitalize the message type for prepending; Don't prepend a message
+  // type for "notice" messages
+  const prefix =
+    message.type !== 'notice'
+      ? `${message.type.charAt(0).toUpperCase() + message.type.slice(1)}: `
+      : '';
   const iconName = message.type === 'notice' ? 'cancel' : message.type;
   /**
    * a11y linting is disabled here: There is a click-to-remove handler on a
@@ -36,47 +42,62 @@ function ToastMessage({ message, onDismiss }) {
    */
   return (
     /* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */
-    <li
-      className={classnames('toast-message-container', {
-        'is-dismissed': message.isDismissed,
+    <Card
+      classes={classnames('p-0 flex border', {
+        'sr-only': message.visuallyHidden,
+        'border-red-error': message.type === 'error',
+        'border-yellow-notice': message.type === 'notice',
+        'border-green-success': message.type === 'success',
       })}
       onClick={() => onDismiss(message.id)}
     >
       <div
-        className={classnames(
-          'toast-message',
-          `toast-message--${message.type}`
-        )}
+        className={classnames('flex items-center p-3 text-white', {
+          'bg-red-error': message.type === 'error',
+          'bg-yellow-notice': message.type === 'notice',
+          'bg-green-success': message.type === 'success',
+        })}
       >
-        <div className="toast-message__type">
-          <SvgIcon name={iconName} className="toast-message__icon" />
-        </div>
-        <div className="toast-message__message">
-          <strong>{prefix}: </strong>
-          {message.message}
-          {message.moreInfoURL && (
-            <div className="toast-message__link">
-              <a
-                href={message.moreInfoURL}
-                onClick={
-                  event =>
-                    event.stopPropagation() /* consume the event so that it does not dismiss the message */
-                }
-                target="_new"
-              >
-                More info
-              </a>
-            </div>
+        <Icon
+          name={iconName}
+          classes={classnames(
+            // Adjust alignment of icon to appear more aligned with text
+            'mt-[2px]'
           )}
-        </div>
+        />
       </div>
-    </li>
+      <div
+        className={classnames(
+          // TODO: After re-factoring of Card styling, `mt-0` should not need
+          // !important
+          'grow p-3 !mt-0'
+        )}
+        data-testid="toast-message-text"
+      >
+        <strong>{prefix}</strong>
+        {message.message}
+        {message.moreInfoURL && (
+          <div className="text-right">
+            <Link
+              href={message.moreInfoURL}
+              onClick={
+                event =>
+                  event.stopPropagation() /* consume the event so that it does not dismiss the message */
+              }
+              target="_new"
+            >
+              More info
+            </Link>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
 /**
  * @typedef ToastMessagesProps
- * @prop {Object} toastMessenger - Injected service
+ * @prop {import('../services/toast-messenger').ToastMessengerService} toastMessenger
  */
 
 /**
@@ -86,27 +107,50 @@ function ToastMessage({ message, onDismiss }) {
  * @param {ToastMessagesProps} props
  */
 function ToastMessages({ toastMessenger }) {
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const messages = store.getToastMessages();
+  // The `ul` containing any toast messages is absolute-positioned and the full
+  // width of the viewport. Each toast message `li` has its position and width
+  // constrained by `container` configuration in tailwind.
   return (
     <div>
       <ul
         aria-live="polite"
         aria-relevant="additions"
-        className="ToastMessages"
+        className="absolute z-2 left-0 w-full"
       >
         {messages.map(message => (
-          <ToastMessage
-            message={message}
+          <li
+            className={classnames(
+              'relative w-full container hover:cursor-pointer',
+              {
+                // Add a bottom margin to visible messages only. Typically we'd
+                // use a `space-y-2` class on the parent to space children.
+                // Doing that here could cause an undesired top margin on
+                // the first visible message in a list that contains (only)
+                // visually-hidden messages before it.
+                // See https://tailwindcss.com/docs/space#limitations
+                'mb-2': !message.visuallyHidden,
+                // Slide in from right in narrow viewports; fade in in
+                // larger viewports to toast message isn't flying too far
+                'motion-safe:animate-slide-in-from-right lg:animate-fade-in':
+                  !message.isDismissed,
+                // Only ever fade in if motion-reduction is preferred
+                'motion-reduce:animate-fade-in': !message.isDismissed,
+                'animate-fade-out': message.isDismissed,
+              }
+            )}
             key={message.id}
-            onDismiss={toastMessenger.dismiss}
-          />
+          >
+            <ToastMessage
+              message={message}
+              onDismiss={id => toastMessenger.dismiss(id)}
+            />
+          </li>
         ))}
       </ul>
     </div>
   );
 }
 
-ToastMessages.injectedProps = ['toastMessenger'];
-
-export default withServices(ToastMessages);
+export default withServices(ToastMessages, ['toastMessenger']);

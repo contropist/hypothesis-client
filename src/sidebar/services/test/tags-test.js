@@ -56,6 +56,18 @@ describe('TagsService', () => {
         count: 1,
         updated: stamp,
       },
+      ინგლისური: {
+        // Non-ASCII characters. This is "English" in Georgian
+        text: 'ინგლისური',
+        count: 1,
+        updated: stamp,
+      },
+      '^žŸ¡\\¢£¤': {
+        // Non-word ASCII with special regex chars
+        text: '^žŸ¡\\¢£¤',
+        count: 1,
+        updated: stamp,
+      },
     };
     const savedTagsList = Object.keys(savedTagsMap);
 
@@ -82,6 +94,14 @@ describe('TagsService', () => {
       assert.deepEqual(tags.filter('b', 1), ['bar']);
       assert.deepEqual(tags.filter('b', 2), ['bar', 'bar argon']);
       assert.deepEqual(tags.filter('b', 3), ['bar', 'bar argon', 'banana']);
+    });
+
+    it('returns non-word ASCII tags that start with the query string', () => {
+      assert.deepEqual(tags.filter('^žŸ¡\\'), ['^žŸ¡\\¢£¤']);
+    });
+
+    it('returns non-ASCII tags that start with the query string', () => {
+      assert.deepEqual(tags.filter('ინ'), ['ინგლისური']);
     });
   });
 
@@ -121,7 +141,9 @@ describe('TagsService', () => {
         'banana',
         'bar argon',
         'future',
+        '^žŸ¡\\¢£¤',
         'argon',
+        'ინგლისური',
       ]);
     });
   });

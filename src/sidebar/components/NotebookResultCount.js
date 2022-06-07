@@ -1,7 +1,7 @@
-import useRootThread from './hooks/use-root-thread';
-import { countVisible } from '../helpers/thread';
+import { Spinner } from '@hypothesis/frontend-shared';
 
-import Spinner from './Spinner';
+import { useRootThread } from './hooks/use-root-thread';
+import { countVisible } from '../helpers/thread';
 
 /**
  * @typedef NotebookResultCountProps
@@ -38,26 +38,28 @@ function NotebookResultCount({
   const threadCount = rootThread.children.length;
 
   return (
-    <div className="NotebookResultCount u-layout-row">
-      {isLoading && <Spinner />}
+    <div className="flex gap-x-1 leading-none">
+      {isLoading && <Spinner size="small" />}
       {!isLoading && (
-        <h2>
-          {!hasResults && <strong>No results</strong>}
+        <h2 className="font-bold">
+          {!hasResults && <span>No results</span>}
           {hasResults && isFiltered && (
-            <strong>
+            <span>
               {matchCount} {matchCount === 1 ? 'result' : 'results'}
-            </strong>
+            </span>
           )}
           {hasResults && !isFiltered && (
-            <strong>
+            <span>
               {threadCount} {threadCount === 1 ? 'thread' : 'threads'}
-            </strong>
+            </span>
           )}
         </h2>
       )}
-      {hasForcedVisible && <h3>(and {forcedVisibleCount} more)</h3>}
+      {hasForcedVisible && (
+        <h3 className="italic font-normal">(and {forcedVisibleCount} more)</h3>
+      )}
       {!isFiltered && hasResults && (
-        <h3>
+        <h3 className="italic font-normal">
           ({visibleCount} {visibleCount === 1 ? 'annotation' : 'annotations'})
         </h3>
       )}

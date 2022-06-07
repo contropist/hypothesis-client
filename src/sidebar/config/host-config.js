@@ -1,4 +1,4 @@
-import * as queryString from 'query-string';
+import { parseConfigFragment } from '../../shared/config-fragment';
 import {
   toBoolean,
   toInteger,
@@ -6,18 +6,17 @@ import {
   toString,
 } from '../../shared/type-coercions';
 
-/** @typedef {import('../../types/config').HostConfig} HostConfig */
+/** @typedef {import('../../types/config').ConfigFromAnnotator} ConfigFromAnnotator */
 
 /**
  * Return the app configuration specified by the frame embedding the Hypothesis
  * client.
  *
- * @return {HostConfig}
+ * @param {Window} window
+ * @return {ConfigFromAnnotator}
  */
-export default function hostPageConfig(window) {
-  const configStr = window.location.hash.slice(1);
-  const configJSON = queryString.parse(configStr).config;
-  const config = JSON.parse(configJSON || '{}');
+export function hostPageConfig(window) {
+  const config = parseConfigFragment(window.location.href);
 
   // Known configuration parameters which we will import from the host page.
   // Note that since the host page is untrusted code, the filtering needs to
@@ -79,14 +78,21 @@ export default function hostPageConfig(window) {
   // It is assumed we should expand this list and coerce and eventually
   // even validate all such config values.
   // See https://github.com/hypothesis/client/issues/1968
+
+  /** @type {Record<string, (value: unknown) => unknown>} */
   const coercions = {
     openSidebar: toBoolean,
+
+    /** @param {unknown} value */
     requestConfigFromFrame: value => {
       if (typeof value === 'string') {
         // Legacy `requestConfigFromFrame` value which holds only the origin.
         return value;
       }
-      const objectVal = toObject(value);
+      const objectVal =
+        /** @type {{ origin: unknown, ancestorLevel: unknown }} */ (
+          toObject(value)
+        );
       return {
         origin: toString(objectVal.origin),
         ancestorLevel: toInteger(objectVal.ancestorLevel),
@@ -94,20 +100,25 @@ export default function hostPageConfig(window) {
     },
   };
 
-  return Object.keys(config).reduce(function (result, key) {
-    if (paramWhiteList.indexOf(key) !== -1) {
-      // Ignore `null` values as these indicate a default value.
-      // In this case the config value set in the sidebar app HTML config is
-      // used.
-      if (config[key] !== null) {
-        if (coercions[key]) {
-          // If a coercion method exists, pass it through
-          result[key] = coercions[key](config[key]);
-        } else {
-          result[key] = config[key];
-        }
-      }
+  /** @type {Record<string, unknown>} */
+  const result = {};
+  for (let [key, value] of Object.entries(config)) {
+    if (!paramWhiteList.includes(key)) {
+      continue;
     }
-    return result;
-  }, {});
+
+    // Ignore `null` values as these indicate a default value.
+    // In this case the config value set in the sidebar app HTML config is
+    // used.
+    if (value === null) {
+      continue;
+    }
+
+    if (coercions[key]) {
+      result[key] = coercions[key](value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
 }

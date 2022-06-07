@@ -1,31 +1,24 @@
-/**
- * This module handles the state affecting the visibility and presence of
- * annotations and threads in the UI.
- */
-
-/**
- * @typedef {import('../../../types/api').Annotation} Annotation
- * @typedef {import("../../../types/sidebar").TabName} TabName
- */
-
-/**
- * @typedef SelectionState
- *   @prop {Object<string,boolean>} expanded
- *   @prop {string[]} forcedVisible
- *   @prop {string[]} selected
- *   @prop {string} sortKey
- *   @prop {'annotation'|'note'|'orphan'} selectedTab
- */
-
 import { createSelector } from 'reselect';
 
 import * as metadata from '../../helpers/annotation-metadata';
 import { countIf, trueKeys, toTrueMap } from '../../util/collections';
-import * as util from '../util';
-import { storeModule } from '../create-store';
+import { createStoreModule, makeAction } from '../create-store';
+
+/**
+ * @typedef {import('../../../types/api').Annotation} Annotation
+ * @typedef {import('../../../types/config').SidebarSettings} SidebarSettings
+ * @typedef {import("../../../types/sidebar").TabName} TabName
+ */
+
+/**
+ * @typedef {Record<string, boolean>} BooleanMap
+ * @typedef {'Location'|'Newest'|'Oldest'} SortKey
+ */
 
 /**
  * Default sort keys for each tab.
+ *
+ * @type {Record<TabName, SortKey>}
  */
 const TAB_SORTKEY_DEFAULT = {
   annotation: 'Location',
@@ -33,7 +26,9 @@ const TAB_SORTKEY_DEFAULT = {
   orphan: 'Location',
 };
 
+/** @param {SidebarSettings} settings */
 function initialSelection(settings) {
+  /** @type {BooleanMap} */
   const selection = {};
   // TODO: Do not take into account existence of `settings.query` here
   // once root-thread-building is fully updated: the decision of whether
@@ -44,18 +39,13 @@ function initialSelection(settings) {
   return selection;
 }
 
-function init(settings) {
+/** @param {SidebarSettings} settings */
+function initialState(settings) {
   return {
     /**
-     * The following objects map annotation identifiers to a boolean
-     * (typically `true`). They are objects (i.e. instead of Arrays) for two
-     * reasons:
-     * - Allows explicit setting of `false`
-     * - Prevents duplicate entries for a single annotation
+     * A set of annotations that are currently "selected" by the user —
+     * these will supersede other filters/selections.
      */
-
-    // A set of annotations that are currently "selected" by the user —
-    // these will supersede other filters/selections
     selected: initialSelection(settings),
 
     // Explicitly-expanded or -collapsed annotations (threads). A collapsed
@@ -63,21 +53,32 @@ function init(settings) {
     // show its replies. Note that there are other factors affecting
     // collapsed states, e.g., top-level threads are collapsed by default
     // until explicitly expanded.
-    expanded: initialSelection(settings) || {},
+    expanded: initialSelection(settings),
 
-    // Set of threads that have been "forced" visible by the user
-    // (e.g. by clicking on "Show x more" button) even though they may not
-    // match the currently-applied filters
+    /**
+     * Set of threads that have been "forced" visible by the user
+     * (e.g. by clicking on "Show x more" button) even though they may not
+     * match the currently-applied filters.
+     *
+     * @type {BooleanMap}
+     */
     forcedVisible: {},
 
+    /** @type {TabName} */
     selectedTab: 'annotation',
-    // Key by which annotations are currently sorted.
+
+    /**
+     * Sort order for annotations.
+     *
+     * @type {SortKey}
+     */
     sortKey: TAB_SORTKEY_DEFAULT.annotation,
   };
 }
 
+/** @typedef {ReturnType<initialState>} State */
+
 /**
- *
  * @param {TabName} newTab
  * @param {TabName} oldTab
  */
@@ -89,7 +90,7 @@ const setTab = (newTab, oldTab) => {
   }
   return {
     selectedTab: newTab,
-    sortKey: TAB_SORTKEY_DEFAULT[newTab],
+    sortKey: /** @type {SortKey} */ (TAB_SORTKEY_DEFAULT[newTab]),
   };
 };
 
@@ -100,36 +101,60 @@ const resetSelection = () => {
   };
 };
 
-const update = {
-  CLEAR_SELECTION: function () {
+const reducers = {
+  CLEAR_SELECTION() {
     return resetSelection();
   },
 
-  SELECT_ANNOTATIONS: function (state, action) {
+  /**
+   * @param {State} state
+   * @param {{ selection: BooleanMap }} action
+   */
+  SELECT_ANNOTATIONS(state, action) {
     return { selected: action.selection };
   },
 
-  SELECT_TAB: function (state, action) {
+  /**
+   * @param {State} state
+   * @param {{ tab: TabName }} action
+   */
+  SELECT_TAB(state, action) {
     return setTab(action.tab, state.selectedTab);
   },
 
-  SET_EXPANDED: function (state, action) {
+  /**
+   * @param {State} state
+   * @param {{ id: string, expanded: boolean }} action
+   */
+  SET_EXPANDED(state, action) {
     const newExpanded = { ...state.expanded };
     newExpanded[action.id] = action.expanded;
     return { expanded: newExpanded };
   },
 
-  SET_FORCED_VISIBLE: function (state, action) {
+  /**
+   * @param {State} state
+   * @param {{ id: string, visible: boolean }} action
+   */
+  SET_FORCED_VISIBLE(state, action) {
     return {
       forcedVisible: { ...state.forcedVisible, [action.id]: action.visible },
     };
   },
 
-  SET_SORT_KEY: function (state, action) {
+  /**
+   * @param {State} state
+   * @param {{ key: SortKey }} action
+   */
+  SET_SORT_KEY(state, action) {
     return { sortKey: action.key };
   },
 
-  TOGGLE_SELECTED_ANNOTATIONS: function (state, action) {
+  /**
+   * @param {State} state
+   * @param {{ toggleIds: string[] }} action
+   */
+  TOGGLE_SELECTED_ANNOTATIONS(state, action) {
     const selection = { ...state.selected };
     action.toggleIds.forEach(id => {
       selection[id] = !selection[id];
@@ -143,6 +168,9 @@ const update = {
    * Automatically select the Page Notes tab, for convenience, if all of the
    * top-level annotations in `action.annotations` are Page Notes and the
    * previous annotation count was 0 (i.e. collection empty).
+   *
+   * @param {State} state
+   * @param {{ annotations: Annotation[], currentAnnotationCount: number }} action
    */
   ADD_ANNOTATIONS(state, action) {
     const topLevelAnnotations = action.annotations.filter(
@@ -157,23 +185,27 @@ const update = {
     return {};
   },
 
-  CHANGE_FOCUS_MODE_USER: function () {
+  CHANGE_FOCUS_MODE_USER() {
     return resetSelection();
   },
 
-  SET_FILTER: function () {
+  SET_FILTER() {
     return { ...resetSelection(), expanded: {} };
   },
 
-  SET_FILTER_QUERY: function () {
+  SET_FILTER_QUERY() {
     return { ...resetSelection(), expanded: {} };
   },
 
-  SET_FOCUS_MODE: function () {
+  SET_FOCUS_MODE() {
     return resetSelection();
   },
 
-  REMOVE_ANNOTATIONS: function (state, action) {
+  /**
+   * @param {State} state
+   * @param {{ annotationsToRemove: Annotation[], remainingAnnotations: Annotation[] }} action
+   */
+  REMOVE_ANNOTATIONS(state, action) {
     let newTab = state.selectedTab;
     // If the orphans tab is selected but no remaining annotations are orphans,
     // switch back to annotations tab
@@ -184,6 +216,7 @@ const update = {
       newTab = 'annotation';
     }
 
+    /** @param {BooleanMap} collection */
     const removeAnns = collection => {
       action.annotationsToRemove.forEach(annotation => {
         if (annotation.id) {
@@ -204,18 +237,12 @@ const update = {
   },
 };
 
-const actions = util.actionTypes(update);
-
-/* Action Creators */
-
 /**
  * Clear all selected annotations and filters. This will leave user-focus
  * alone, however.
  */
 function clearSelection() {
-  return {
-    type: actions.CLEAR_SELECTION,
-  };
+  return makeAction(reducers, 'CLEAR_SELECTION', undefined);
 }
 
 /**
@@ -225,12 +252,12 @@ function clearSelection() {
  * @param {string[]} ids - Identifiers of annotations to select
  */
 function selectAnnotations(ids) {
+  /** @param {import('redux').Dispatch} dispatch */
   return dispatch => {
-    dispatch({ type: actions.CLEAR_SELECTION });
-    dispatch({
-      type: actions.SELECT_ANNOTATIONS,
-      selection: toTrueMap(ids),
-    });
+    dispatch(clearSelection());
+    dispatch(
+      makeAction(reducers, 'SELECT_ANNOTATIONS', { selection: toTrueMap(ids) })
+    );
   };
 }
 
@@ -240,10 +267,7 @@ function selectAnnotations(ids) {
  * @param {TabName} tabKey
  */
 function selectTab(tabKey) {
-  return {
-    type: actions.SELECT_TAB,
-    tab: tabKey,
-  };
+  return makeAction(reducers, 'SELECT_TAB', { tab: tabKey });
 }
 
 /**
@@ -253,11 +277,7 @@ function selectTab(tabKey) {
  * @param {boolean} expanded - `true` for expanded replies, `false` to collapse
  */
 function setExpanded(id, expanded) {
-  return {
-    type: actions.SET_EXPANDED,
-    id,
-    expanded,
-  };
+  return makeAction(reducers, 'SET_EXPANDED', { id, expanded });
 }
 
 /**
@@ -270,19 +290,16 @@ function setExpanded(id, expanded) {
  *        conflicts with current filters?
  */
 function setForcedVisible(id, visible) {
-  return {
-    type: actions.SET_FORCED_VISIBLE,
-    id,
-    visible,
-  };
+  return makeAction(reducers, 'SET_FORCED_VISIBLE', { id, visible });
 }
 
-/** Sets the sort key for the annotation list. */
+/**
+ * Sets the sort key for the annotation list.
+ *
+ * @param {SortKey} key
+ */
 function setSortKey(key) {
-  return {
-    type: actions.SET_SORT_KEY,
-    key: key,
-  };
+  return makeAction(reducers, 'SET_SORT_KEY', { key });
 }
 
 /**
@@ -292,45 +309,35 @@ function setSortKey(key) {
  * @param {string[]} toggleIds - identifiers of annotations to toggle
  */
 function toggleSelectedAnnotations(toggleIds) {
-  return {
-    type: actions.TOGGLE_SELECTED_ANNOTATIONS,
-    toggleIds,
-  };
+  return makeAction(reducers, 'TOGGLE_SELECTED_ANNOTATIONS', { toggleIds });
 }
-
-/* Selectors */
 
 /**
  * Retrieve map of expanded/collapsed annotations (threads)
  *
- * @return {Object<string,boolean>}
+ * @param {State} state
  */
 function expandedMap(state) {
   return state.expanded;
 }
 
-/**
- * @type {(state: any) => string[]}
- */
 const forcedVisibleThreads = createSelector(
+  /** @param {State} state */
   state => state.forcedVisible,
   forcedVisible => trueKeys(forcedVisible)
 );
 
 /**
  * Are any annotations currently selected?
- *
- * @type {(state: any) => boolean}
  */
 const hasSelectedAnnotations = createSelector(
+  /** @param {State} state */
   state => state.selected,
   selection => trueKeys(selection).length > 0
 );
 
-/**
- * @type {(state: any) => string[]}
- */
 const selectedAnnotations = createSelector(
+  /** @param {State} state */
   state => state.selected,
   selection => trueKeys(selection)
 );
@@ -338,16 +345,14 @@ const selectedAnnotations = createSelector(
 /**
  * Return the currently-selected tab
  *
- * @return {TabName}
+ * @param {State} state
  */
 function selectedTab(state) {
   return state.selectedTab;
 }
 
-/**
- * @return {SelectionState}
- */
 const selectionState = createSelector(
+  /** @param {State} state */
   state => state,
   selection => {
     return {
@@ -361,10 +366,9 @@ const selectionState = createSelector(
 );
 
 /**
- * Retrieve the current sort option key
- * TODO: sortKey could be typedef'd
+ * Retrieve the current sort option key.
  *
- * @return {string}
+ * @param {State} state
  */
 function sortKey(state) {
   return state.sortKey;
@@ -372,12 +376,12 @@ function sortKey(state) {
 
 /**
  * Retrieve applicable sort options for the currently-selected tab.
- *
- * @type {(state: any) => string[]}
  */
 const sortKeys = createSelector(
+  /** @param {State} state */
   state => state.selectedTab,
   selectedTab => {
+    /** @type {SortKey[]} */
     const sortKeysForTab = ['Newest', 'Oldest'];
     if (selectedTab !== 'note') {
       // Location is inapplicable to Notes tab
@@ -387,12 +391,11 @@ const sortKeys = createSelector(
   }
 );
 
-export default storeModule({
-  init: init,
+export const selectionModule = createStoreModule(initialState, {
   namespace: 'selection',
-  update: update,
+  reducers,
 
-  actions: {
+  actionCreators: {
     clearSelection,
     selectAnnotations,
     selectTab,

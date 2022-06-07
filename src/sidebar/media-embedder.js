@@ -1,5 +1,3 @@
-import * as queryString from 'query-string';
-
 /**
  * Return an HTML5 audio player with the given src URL.
  *
@@ -58,7 +56,7 @@ function iframe(src, aspectRatio = 16 / 9) {
  * it's assumed to be seconds and is left alone.
  *
  * @param {string} timeValue - value of `t` or `start` param in YouTube URL
- * @returns {string} timeValue in seconds
+ * @return {string} timeValue in seconds
  * @example
  * formatYouTubeTime('5m'); // returns '300'
  * formatYouTubeTime('20m10s'); // returns '1210'
@@ -78,7 +76,8 @@ function parseTimeString(timeValue) {
   // match[2] - Unit (e.g. 'h','m','s', or empty)
   while ((match = timePattern.exec(timeValue)) !== null) {
     if (match[2]) {
-      seconds += Number(match[1]) * multipliers[match[2]];
+      const unit = /** @type {keyof multipliers} */ (match[2]);
+      seconds += Number(match[1]) * multipliers[unit];
     } else {
       seconds += +match[1]; // Treat values missing units as seconds
     }
@@ -92,7 +91,8 @@ function parseTimeString(timeValue) {
  * all parameter possibilities.
  *
  * @param {HTMLAnchorElement} link
- * @returns {string} formatted filtered URL query string, e.g. '?start=90'
+ * @return {string} formatted filtered URL query string, e.g. '?start=90' or
+ *   an empty string if the filtered query is empty.
  * @example
  * // returns '?end=10&start=5'
  * youTubeQueryParams(link); // where `link.search` = '?t=5&baz=foo&end=10'
@@ -103,29 +103,33 @@ function parseTimeString(timeValue) {
  * @param {HTMLAnchorElement} link
  */
 function youTubeQueryParams(link) {
-  let query;
   const allowedParams = [
     'end',
     'start',
     't', // will be translated to `start`
   ];
-  const linkParams = queryString.parse(link.search);
-  const filteredQuery = {};
-  // Filter linkParams for allowed keys and build those entries
-  // into the filteredQuery object
-  Object.keys(linkParams)
-    .filter(key => allowedParams.includes(key))
-    .forEach(key => {
-      if (key === 't') {
-        // `t` is not supported in embeds; `start` is
-        // `t` accepts more formats than `start`; start must be in seconds
-        // so, format it as seconds first
-        filteredQuery.start = parseTimeString(linkParams[key]);
-      } else {
-        filteredQuery[key] = linkParams[key];
-      }
-    });
-  query = queryString.stringify(filteredQuery);
+  const linkParams = new URLSearchParams(link.search);
+  const filteredQuery = new URLSearchParams();
+
+  // Copy allowed params into `filteredQuery`.
+  for (let [key, value] of linkParams) {
+    if (!allowedParams.includes(key)) {
+      continue;
+    }
+    if (key === 't') {
+      // `t` is not supported in embeds; `start` is
+      // `t` accepts more formats than `start`; start must be in seconds
+      // so, format it as seconds first
+      filteredQuery.append('start', parseTimeString(value));
+    } else {
+      filteredQuery.append(key, value);
+    }
+  }
+
+  // Tests currently expect sorted parameters.
+  filteredQuery.sort();
+
+  let query = filteredQuery.toString();
   if (query) {
     query = `?${query}`;
   }
@@ -152,7 +156,7 @@ function youTubeEmbed(id, link) {
  *   contain a single capture group which matches the video ID within the path.
  * @param {(videoId: string) => string} iframeUrlGenerator -
  *   Generate the URL for an embedded video iframe from a video ID
- * @param {Object} [options]
+ * @param {object} [options]
  *   @param {number} [options.aspectRatio]
  * @return {(link: HTMLAnchorElement) => HTMLElement|null}
  */
@@ -162,6 +166,7 @@ function createEmbedGenerator(
   iframeUrlGenerator,
   { aspectRatio } = {}
 ) {
+  /** @param {HTMLAnchorElement} link */
   const generator = link => {
     if (link.hostname !== hostname) {
       return null;
@@ -274,9 +279,9 @@ const embedGenerators = [
     // Extract start and end times, which may appear either as query string
     // params or path params.
     let slug = slugMatch[2];
-    const linkParams = queryString.parse(link.search);
-    let startTime = linkParams.start;
-    let endTime = linkParams.end;
+    const linkParams = new URLSearchParams(link.search);
+    let startTime = linkParams.get('start');
+    let endTime = linkParams.get('end');
 
     if (!startTime) {
       const startPathParam = slug.match(/\/start\/([^/]+)/);
@@ -341,7 +346,8 @@ function embedForLink(link) {
   return null;
 }
 
-/** Replace the given link element with an embed.
+/**
+ * Replace the given link element with an embed.
  *
  * If the given link element is a link to an embeddable media and if its link
  * text is the same as its href then it will be replaced in the DOM with an
@@ -370,12 +376,17 @@ function replaceLinkWithEmbed(link) {
   // The link's text may or may not be percent encoded. The `link.href` property
   // will always be percent encoded. When comparing the two we need to be
   // agnostic as to which representation is used.
-  if (
-    link.href !== link.textContent &&
-    decodeURI(link.href) !== link.textContent
-  ) {
-    return null;
+  if (link.href !== link.textContent) {
+    try {
+      const encodedText = encodeURI(/** @type {string} */ (link.textContent));
+      if (link.href !== encodedText) {
+        return null;
+      }
+    } catch {
+      return null;
+    }
   }
+
   const embed = embedForLink(link);
   if (embed) {
     /** @type {Element} */ (link.parentElement).replaceChild(embed, link);
@@ -390,7 +401,7 @@ function replaceLinkWithEmbed(link) {
  * embeds of the same media.
  *
  * @param {HTMLElement} element
- * @param {Object} options
+ * @param {object} options
  *   @param {string} [options.className] -
  *     Class name to apply to embed containers. An important function of this class is to set
  *     the width of the embed.

@@ -1,6 +1,8 @@
 import * as Sentry from '@sentry/browser';
 
-import warnOnce from '../../shared/warn-once';
+import { parseConfigFragment } from '../../shared/config-fragment';
+import { handleErrorsInFrames } from '../../shared/frame-error-capture';
+import { warnOnce } from '../../shared/warn-once';
 
 /**
  * @typedef SentryConfig
@@ -11,20 +13,19 @@ import warnOnce from '../../shared/warn-once';
 let eventsSent = 0;
 const maxEventsToSendPerSession = 5;
 
-/**
- * Return the origin which the current script comes from.
- *
- * @return {string|null}
- */
+/** @type {(() => void)|null} */
+let removeFrameErrorHandler = null;
+
 function currentScriptOrigin() {
-  try {
-    // This property is only available while a `<script>` tag is initially being executed.
-    const script = /** @type {HTMLScriptElement} */ (document.currentScript);
-    const scriptUrl = new URL(script.src);
-    return scriptUrl.origin;
-  } catch (e) {
+  // It might be possible to simplify this as `url` appears to be required
+  // according to the HTML spec.
+  //
+  // See https://html.spec.whatwg.org/multipage/webappapis.html#hostgetimportmetaproperties.
+  let url = import.meta.url;
+  if (!url) {
     return null;
   }
+  return new URL(url).origin;
 }
 
 /**
@@ -36,25 +37,34 @@ function currentScriptOrigin() {
  * @param {SentryConfig} config
  */
 export function init(config) {
-  // Only send events for errors which can be attributed to our code. This
-  // reduces noise in Sentry caused by errors triggered by eg. script tags added
-  // by browser extensions. The downside is that this may cause us to miss errors
-  // which are caused by our code but, for any reason, cannot be attributed to
-  // it. This logic assumes that all of our script bundles are served from
-  // the same origin as the bundle which includes this module.
-  //
-  // If we can't determine the current script's origin, just disable the
-  // whitelist and report all errors.
   const scriptOrigin = currentScriptOrigin();
-  const whitelistUrls = scriptOrigin ? [scriptOrigin] : undefined;
+  const allowUrls = scriptOrigin ? [scriptOrigin] : undefined;
 
   Sentry.init({
     dsn: config.dsn,
     environment: config.environment,
-    // Do not log Fetch failures to avoid inundating with unhandled fetch exceptions
-    ignoreErrors: ['Fetch operation failed'],
-    release: '__VERSION__', // replaced by versionify
-    whitelistUrls,
+
+    // Only report exceptions where the stack trace references a URL that is
+    // part of our code. This reduces noise caused by third-party scripts which
+    // may be injected by browser extensions.
+    //
+    // Sentry currently always allows exceptions to bypass this list if no
+    // URL can be extracted.
+    allowUrls,
+
+    // Ignore various errors due to circumstances outside of our control.
+    ignoreErrors: [
+      // Ignore network request failures. Some of these ought to be
+      // caught and handled better but for now we are suppressing them to
+      // improve the signal-to-noise ratio.
+      'Network request failed', // Standard message prefix for `FetchError` errors
+
+      // Ignore an error that appears to come from CefSharp (embedded Chromium).
+      // See https://forum.sentry.io/t/unhandledrejection-non-error-promise-rejection-captured-with-value/14062/20
+      'Object Not Found Matching Id',
+    ],
+
+    release: '__VERSION__',
 
     // See https://docs.sentry.io/error-reporting/configuration/filtering/?platform=javascript#before-send
     beforeSend: (event, hint) => {
@@ -78,6 +88,9 @@ export function init(config) {
       try {
         const originalErr = hint && hint.originalException;
         if (originalErr instanceof Event) {
+          if (!event.extra) {
+            event.extra = {};
+          }
           Object.assign(event.extra, {
             type: originalErr.type,
             // @ts-ignore - `detail` is a property of certain event types.
@@ -93,12 +106,31 @@ export function init(config) {
     },
   });
 
-  // In the sidebar application, it is often useful to know the URL which the
-  // client was loaded into. This information is usually available in an iframe
-  // via `document.referrer`. More information about the document is available
-  // later when frames where the "annotator" code has loaded have connected to
-  // the sidebar via `postMessage` RPC messages.
-  Sentry.setExtra('document_url', document.referrer);
+  try {
+    Sentry.setExtra('host_config', parseConfigFragment(window.location.href));
+  } catch (e) {
+    // Ignore errors parsing configuration.
+  }
+
+  /** @param {HTMLScriptElement} script */
+  const isJavaScript = script =>
+    !script.type || script.type.match(/javascript|module/);
+
+  // Include information about the scripts on the page. This may help with
+  // debugging of errors caused by scripts injected by browser extensions.
+  const loadedScripts = Array.from(document.querySelectorAll('script'))
+    .filter(isJavaScript)
+    .map(script => script.src || '<inline>');
+  Sentry.setExtra('loaded_scripts', loadedScripts);
+
+  // Catch errors occuring in Hypothesis-related code in the host frame.
+  removeFrameErrorHandler = handleErrorsInFrames((err, context) => {
+    Sentry.captureException(err, {
+      tags: {
+        context,
+      },
+    });
+  });
 }
 
 /**
@@ -113,8 +145,11 @@ export function setUserInfo(user) {
 }
 
 /**
- * Reset metrics used for client-side event filtering.
+ * Testing aid that resets event counters and removes event handlers installed
+ * by {@link init}.
  */
 export function reset() {
   eventsSent = 0;
+  removeFrameErrorHandler?.();
+  removeFrameErrorHandler = null;
 }

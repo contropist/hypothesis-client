@@ -1,9 +1,9 @@
+import { Panel } from '@hypothesis/frontend-shared';
 import { useCallback, useEffect, useRef } from 'preact/hooks';
 import scrollIntoView from 'scroll-into-view';
 
-import { useStoreProxy } from '../store/use-store';
+import { useSidebarStore } from '../store';
 
-import Panel from './Panel';
 import Slider from './Slider';
 
 /**
@@ -18,7 +18,7 @@ import Slider from './Slider';
  *   A string identifying this panel. Only one `panelName` may be active at any time.
  *   Multiple panels with the same `panelName` would be "in sync", opening and closing together.
  * @prop {string} title - The panel's title
- * @prop {(active: boolean) => any} [onActiveChanged] -
+ * @prop {(active: boolean) => void} [onActiveChanged] -
  *   Optional callback to invoke when this panel's active status changes
  */
 
@@ -35,7 +35,7 @@ export default function SidebarPanel({
   title,
   onActiveChanged,
 }) {
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const panelIsActive = store.isSidebarPanelOpen(panelName);
 
   const panelElement = useRef(/** @type {HTMLDivElement|null}*/ (null));
@@ -45,7 +45,7 @@ export default function SidebarPanel({
   useEffect(() => {
     if (panelWasActive.current !== panelIsActive) {
       panelWasActive.current = panelIsActive;
-      if (panelIsActive) {
+      if (panelIsActive && panelElement.current) {
         scrollIntoView(panelElement.current);
       }
       if (typeof onActiveChanged === 'function') {
@@ -60,7 +60,7 @@ export default function SidebarPanel({
 
   return (
     <Slider visible={panelIsActive}>
-      <div ref={panelElement}>
+      <div ref={panelElement} className="mb-4">
         <Panel title={title} icon={icon} onClose={closePanel}>
           {children}
         </Panel>

@@ -1,14 +1,12 @@
-import { LabeledButton } from '@hypothesis/frontend-shared';
+import { LabeledButton, Panel } from '@hypothesis/frontend-shared';
 
-import { useStoreProxy } from '../store/use-store';
-
-import Panel from './Panel';
+import { useSidebarStore } from '../store';
 
 /**
  * @typedef SidebarContentErrorProps
  * @prop {'annotation'|'group'} errorType
  * @prop {boolean} [showClearSelection] - Whether to show a "Clear selection" button.
- * @prop {() => any} onLoginRequest - A function that will launch the login flow for the user.
+ * @prop {() => void} onLoginRequest - A function that will launch the login flow for the user.
  */
 
 /**
@@ -22,7 +20,7 @@ export default function SidebarContentError({
   onLoginRequest,
   showClearSelection = false,
 }) {
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const isLoggedIn = store.isLoggedIn();
 
   const errorTitle =
@@ -42,23 +40,25 @@ export default function SidebarContentError({
   })();
 
   return (
-    <Panel icon="restricted" title={errorTitle}>
-      <p>{errorMessage}</p>
-      <div className="u-layout-row--justify-right u-horizontal-rhythm">
-        {showClearSelection && (
-          <LabeledButton
-            variant={isLoggedIn ? 'primary' : undefined}
-            onClick={() => store.clearSelection()}
-          >
-            Show all annotations
-          </LabeledButton>
-        )}
-        {!isLoggedIn && (
-          <LabeledButton variant="primary" onClick={onLoginRequest}>
-            Log in
-          </LabeledButton>
-        )}
-      </div>
-    </Panel>
+    <div className="mb-4">
+      <Panel icon="restricted" title={errorTitle}>
+        <p>{errorMessage}</p>
+        <div className="flex justify-end space-x-2">
+          {showClearSelection && (
+            <LabeledButton
+              variant={isLoggedIn ? 'primary' : undefined}
+              onClick={() => store.clearSelection()}
+            >
+              Show all annotations
+            </LabeledButton>
+          )}
+          {!isLoggedIn && (
+            <LabeledButton variant="primary" onClick={onLoginRequest}>
+              Log in
+            </LabeledButton>
+          )}
+        </div>
+      </Panel>
+    </div>
   );
 }

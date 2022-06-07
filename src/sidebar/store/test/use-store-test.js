@@ -1,18 +1,15 @@
 import { mount } from 'enzyme';
 import { act } from 'preact/test-utils';
 
-import createStore from '../create-store';
-import { useStoreProxy, $imports } from '../use-store';
+import { createStore, createStoreModule } from '../create-store';
+import { useStore } from '../use-store';
 
 // Store module for use with `createStore` in tests.
-const thingsModule = {
+const initialState = () => ({ things: [] });
+const thingsModule = createStoreModule(initialState, {
   namespace: 'things',
 
-  init: () => ({
-    things: [],
-  }),
-
-  update: {
+  reducers: {
     ADD_THING(state, action) {
       if (state.things.some(t => t.id === action.thing.id)) {
         return {};
@@ -21,7 +18,7 @@ const thingsModule = {
     },
   },
 
-  actions: {
+  actionCreators: {
     addThing(id) {
       return { type: 'ADD_THING', thing: { id } };
     },
@@ -36,37 +33,30 @@ const thingsModule = {
       return state.things.find(t => t.id === id);
     },
   },
-};
+});
 
 describe('sidebar/store/use-store', () => {
-  afterEach(() => {
-    $imports.$restore();
-  });
-
-  describe('useStoreProxy', () => {
+  describe('useStore', () => {
     let store;
     let renderCount;
 
     beforeEach(() => {
       renderCount = 0;
       store = createStore([thingsModule]);
-
       store.addThing('foo');
       store.addThing('bar');
-
-      $imports.$mock({
-        '../service-context': {
-          useService: name => (name === 'store' ? store : null),
-        },
-      });
     });
+
+    function useTestStore() {
+      return useStore(store);
+    }
 
     function renderTestComponent() {
       let proxy;
 
       const TestComponent = () => {
         ++renderCount;
-        proxy = useStoreProxy();
+        proxy = useTestStore();
 
         return <div>{proxy.thingCount()}</div>;
       };
@@ -85,7 +75,10 @@ describe('sidebar/store/use-store', () => {
       assert.deepEqual(proxy.getThing('bar'), { id: 'bar' });
 
       // Test proxied action dispatch.
-      proxy.addThing('baz');
+      act(() => {
+        proxy.addThing('baz');
+      });
+
       assert.calledWith(addThingSpy, 'baz');
     });
 
@@ -121,8 +114,10 @@ describe('sidebar/store/use-store', () => {
 
       const { proxy } = renderTestComponent();
 
-      proxy.addThing('foo');
-      proxy.addThing('foo');
+      act(() => {
+        proxy.addThing('foo');
+        proxy.addThing('foo');
+      });
 
       assert.calledTwice(addThingSpy);
       assert.calledWith(addThingSpy, 'foo');

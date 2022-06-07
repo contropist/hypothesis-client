@@ -1,8 +1,7 @@
 import { mount } from 'enzyme';
 
 import { waitFor } from '../../../test-util/wait';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
-
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 import AnnotationView, { $imports } from '../AnnotationView';
 
 describe('AnnotationView', () => {
@@ -14,7 +13,6 @@ describe('AnnotationView', () => {
   beforeEach(() => {
     fakeStore = {
       clearAnnotations: sinon.stub(),
-      getState: sinon.stub().returns({}),
       highlightAnnotations: sinon.stub(),
       routeParams: sinon.stub().returns({ id: 'test_annotation_id' }),
       profile: sinon.stub().returns({ userid: null }),
@@ -33,8 +31,8 @@ describe('AnnotationView', () => {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      './hooks/use-root-thread': fakeUseRootThread,
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      './hooks/use-root-thread': { useRootThread: fakeUseRootThread },
+      '../store': { useSidebarStore: () => fakeStore },
     });
   });
 

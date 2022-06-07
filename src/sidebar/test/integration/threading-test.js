@@ -3,38 +3,46 @@ import { useReducer } from 'preact/hooks';
 import { act } from 'preact/test-utils';
 
 import { Injector } from '../../../shared/injector';
-import storeFactory from '../../store';
-
+import { useRootThread } from '../../components/hooks/use-root-thread';
 import { ServiceContext } from '../../service-context';
-import useRootThread from '../../components/hooks/use-root-thread';
+import { createSidebarStore } from '../../store';
+
+const defaultFields = {
+  $orphan: false,
+  tags: [],
+  target: [{ source: 'https://example.com' }],
+  references: [],
+  uri: 'https://example.com',
+  user: 'acct:foo@hypothes.is',
+};
 
 const fixtures = {
   annotations: [
     {
-      $orphan: false,
+      ...defaultFields,
+
       created: 50,
       id: '1',
-      references: [],
-      target: [{ selector: [] }],
       text: 'first annotation',
       updated: 300,
     },
     {
-      $orphan: false,
+      ...defaultFields,
+
       created: 200,
       id: '2',
-      references: [],
       text: 'second annotation',
-      target: [{ selector: [] }],
       updated: 200,
     },
     {
-      $orphan: false,
+      ...defaultFields,
+
       created: 100,
       id: '3',
       references: ['2'],
       text: 'reply to first annotation',
       updated: 100,
+      user: 'acct:bar@hypothes.is',
     },
   ],
 };
@@ -44,9 +52,9 @@ describe('integration: annotation threading', () => {
   let store;
   let forceUpdate;
 
-  beforeEach(function () {
+  beforeEach(() => {
     const container = new Injector()
-      .register('store', storeFactory)
+      .register('store', { factory: createSidebarStore })
       .register('annotationsService', () => {})
       .register('settings', { value: {} });
 

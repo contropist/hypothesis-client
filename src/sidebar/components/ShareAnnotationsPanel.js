@@ -1,6 +1,12 @@
-import { IconButton, SvgIcon } from '@hypothesis/frontend-shared';
+import {
+  IconButton,
+  Spinner,
+  Icon,
+  TextInput,
+  TextInputWithButton,
+} from '@hypothesis/frontend-shared';
 
-import { useStoreProxy } from '../store/use-store';
+import { useSidebarStore } from '../store';
 import { pageSharingLink } from '../helpers/annotation-sharing';
 import { copyText } from '../util/copy-to-clipboard';
 import { withServices } from '../service-context';
@@ -8,7 +14,6 @@ import { notNull } from '../util/typing';
 
 import ShareLinks from './ShareLinks';
 import SidebarPanel from './SidebarPanel';
-import Spinner from './Spinner';
 
 /**
  * @typedef ShareAnnotationsPanelProps
@@ -25,7 +30,7 @@ import Spinner from './Spinner';
  * @param {ShareAnnotationsPanelProps} props
  */
 function ShareAnnotationsPanel({ toastMessenger }) {
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const mainFrame = store.mainFrame();
   const focusedGroup = store.focusedGroup();
   const groupName = (focusedGroup && focusedGroup.name) || '...';
@@ -51,15 +56,18 @@ function ShareAnnotationsPanel({ toastMessenger }) {
   return (
     <SidebarPanel title={panelTitle} panelName="shareGroupAnnotations">
       {!sharingReady && (
-        <div className="ShareAnnotationsPanel__spinner">
+        <div className="flex flex-row items-center justify-center">
           <Spinner />
         </div>
       )}
       {sharingReady && (
-        <div className="ShareAnnotationsPanel">
+        <div className="text-color-text-light space-y-3">
           {shareURI ? (
             <>
-              <div className="ShareAnnotationsPanel__intro">
+              <div
+                className="text-color-text font-medium"
+                data-testid="sharing-intro"
+              >
                 {notNull(focusedGroup).type === 'private' ? (
                   <p>
                     Use this link to share these annotations with other group
@@ -69,22 +77,23 @@ function ShareAnnotationsPanel({ toastMessenger }) {
                   <p>Use this link to share these annotations with anyone:</p>
                 )}
               </div>
-              <div className="u-layout-row">
-                <input
-                  aria-label="Use this URL to share these annotations"
-                  className="ShareAnnotationsPanel__form-input"
-                  type="text"
-                  value={shareURI}
-                  readOnly
-                />
-                <IconButton
-                  className="InputButton"
-                  icon="copy"
-                  onClick={copyShareLink}
-                  title="Copy share link"
-                />
+              <div>
+                <TextInputWithButton>
+                  <TextInput
+                    aria-label="Use this URL to share these annotations"
+                    type="text"
+                    value={shareURI}
+                    readOnly
+                  />
+                  <IconButton
+                    icon="copy"
+                    onClick={copyShareLink}
+                    title="Copy share link"
+                    variant="dark"
+                  />
+                </TextInputWithButton>
               </div>
-              <p>
+              <p data-testid="sharing-details">
                 {notNull(focusedGroup).type === 'private' ? (
                   <span>
                     Annotations in the private group{' '}
@@ -99,14 +108,16 @@ function ShareAnnotationsPanel({ toastMessenger }) {
                 )}{' '}
                 <span>
                   Private (
-                  <SvgIcon name="lock" inline className="u-icon--inline" />{' '}
-                  <em>Only Me</em>) annotations are only visible to you.
+                  <Icon name="lock" classes="inline -mt-0.5" /> <em>Only Me</em>
+                  ) annotations are only visible to you.
                 </span>
               </p>
-              <ShareLinks shareURI={shareURI} />
+              <div className="text-[24px]">
+                <ShareLinks shareURI={shareURI} />
+              </div>
             </>
           ) : (
-            <p>
+            <p data-testid="no-sharing">
               These annotations cannot be shared because this document is not
               available on the web.
             </p>
@@ -117,6 +128,4 @@ function ShareAnnotationsPanel({ toastMessenger }) {
   );
 }
 
-ShareAnnotationsPanel.injectedProps = ['toastMessenger'];
-
-export default withServices(ShareAnnotationsPanel);
+export default withServices(ShareAnnotationsPanel, ['toastMessenger']);

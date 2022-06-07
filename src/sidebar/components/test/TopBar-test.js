@@ -1,15 +1,12 @@
 import { mount } from 'enzyme';
 
-import bridgeEvents from '../../../shared/bridge-events';
-import TopBar from '../TopBar';
-import { $imports } from '../TopBar';
-
 import { checkAccessibility } from '../../../test-util/accessibility';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
+import TopBar, { $imports } from '../TopBar';
 
 describe('TopBar', () => {
   const fakeSettings = {};
-  let fakeBridge;
+  let fakeFrameSync;
   let fakeStore;
   let fakeStreamer;
   let fakeIsThirdPartyService;
@@ -26,8 +23,8 @@ describe('TopBar', () => {
       toggleSidebarPanel: sinon.stub(),
     };
 
-    fakeBridge = {
-      call: sinon.stub(),
+    fakeFrameSync = {
+      notifyHost: sinon.stub(),
     };
 
     fakeServiceConfig = sinon.stub().returns({});
@@ -37,10 +34,13 @@ describe('TopBar', () => {
     };
 
     $imports.$mock(mockImportedComponents());
+
     $imports.$mock({
-      '../store/use-store': { useStoreProxy: () => fakeStore },
-      '../helpers/is-third-party-service': fakeIsThirdPartyService,
-      '../config/service-config': fakeServiceConfig,
+      '../store': { useSidebarStore: () => fakeStore },
+      '../helpers/is-third-party-service': {
+        isThirdPartyService: fakeIsThirdPartyService,
+      },
+      '../config/service-config': { serviceConfig: fakeServiceConfig },
     });
   });
 
@@ -58,7 +58,7 @@ describe('TopBar', () => {
     return mount(
       <TopBar
         auth={auth}
-        bridge={fakeBridge}
+        frameSync={fakeFrameSync}
         isSidebar={true}
         settings={fakeSettings}
         streamer={fakeStreamer}
@@ -112,7 +112,7 @@ describe('TopBar', () => {
       });
 
       context('help service handler configured in services', () => {
-        it('fires a bridge event if help clicked and service is configured', () => {
+        it('notifies host frame if help clicked and service is configured', () => {
           fakeServiceConfig.returns({ onHelpRequestProvided: true });
           const wrapper = createTopBar();
 
@@ -121,14 +121,14 @@ describe('TopBar', () => {
           helpButton.props().onClick();
 
           assert.equal(fakeStore.toggleSidebarPanel.callCount, 0);
-          assert.calledWith(fakeBridge.call, bridgeEvents.HELP_REQUESTED);
+          assert.calledWith(fakeFrameSync.notifyHost, 'helpRequested');
         });
       });
     });
   });
 
   describe('login/account actions', () => {
-    const getLoginText = wrapper => wrapper.find('.TopBar__login-links');
+    const getLoginText = wrapper => wrapper.find('[data-testid="login-links"]');
 
     it('Shows ellipsis when login state is unknown', () => {
       const wrapper = createTopBar({ auth: { status: 'unknown' } });

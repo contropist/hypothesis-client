@@ -1,12 +1,16 @@
 import { TinyEmitter } from 'tiny-emitter';
 
+/** @typedef {import('../../types/annotator').Destroyable} Destroyable */
+
 /**
  * Emitter is a communication class that implements the publisher/subscriber
  * pattern. It allows sending and listening events through a shared EventBus.
  * The different elements of the application can communicate with each other
  * without being tightly coupled.
+ *
+ * @implements {Destroyable}
  */
-class Emitter {
+export class Emitter {
   /**
    * @param {TinyEmitter} emitter
    */
@@ -21,7 +25,7 @@ class Emitter {
    * Fire an event.
    *
    * @param {string} event
-   * @param {any[]} args
+   * @param {unknown[]} args
    */
   publish(event, ...args) {
     this._emitter.emit(event, ...args);

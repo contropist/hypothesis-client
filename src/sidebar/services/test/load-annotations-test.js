@@ -1,6 +1,6 @@
 import EventEmitter from 'tiny-emitter';
 
-import loadAnnotationsService, { $imports } from '../load-annotations';
+import { LoadAnnotationsService, $imports } from '../load-annotations';
 
 let searchClients;
 let longRunningSearchClient = false;
@@ -45,7 +45,7 @@ class FakeSearchClient extends EventEmitter {
   }
 }
 
-describe('loadAnnotationsService', () => {
+describe('LoadAnnotationsService', () => {
   let fakeApi;
   let fakeStore;
   let fakeStreamer;
@@ -109,10 +109,10 @@ describe('loadAnnotationsService', () => {
   function createService() {
     fakeStore.frames.returns(
       fakeUris.map(uri => {
-        return { uri: uri };
+        return { uri };
       })
     );
-    return loadAnnotationsService(
+    return new LoadAnnotationsService(
       fakeApi,
       fakeStore,
       fakeStreamer,
@@ -120,7 +120,7 @@ describe('loadAnnotationsService', () => {
     );
   }
 
-  describe('load', () => {
+  describe('#load', () => {
     it('unloads any existing annotations', () => {
       // When new clients connect, all existing annotations should be unloaded
       // before reloading annotations for each currently-connected client.
@@ -167,7 +167,7 @@ describe('loadAnnotationsService', () => {
       // Override the default frames set by the service call above.
       fakeStore.frames.returns([
         {
-          uri: uri,
+          uri,
           metadata: {
             documentFingerprint: 'fingerprint',
             link: [
@@ -382,7 +382,7 @@ describe('loadAnnotationsService', () => {
     });
   });
 
-  describe('loadThread', () => {
+  describe('#loadThread', () => {
     let threadAnnotations = [
       { id: 'parent_annotation_1' },
       { id: 'parent_annotation_2', references: ['parent_annotation_1'] },

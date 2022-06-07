@@ -1,12 +1,11 @@
 import { mount } from 'enzyme';
 
-import Tutorial from '../Tutorial';
-import { $imports } from '../Tutorial';
+import Tutorial, { $imports } from '../Tutorial';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
-describe('Tutorial', function () {
+describe('Tutorial', () => {
   let fakeIsThirdPartyService;
 
   function createComponent(props) {
@@ -18,7 +17,9 @@ describe('Tutorial', function () {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      '../helpers/is-third-party-service': fakeIsThirdPartyService,
+      '../helpers/is-third-party-service': {
+        isThirdPartyService: fakeIsThirdPartyService,
+      },
     });
   });
 

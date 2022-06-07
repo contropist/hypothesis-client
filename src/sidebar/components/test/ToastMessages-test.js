@@ -1,7 +1,7 @@
 import { mount } from 'enzyme';
 import { act } from 'preact/test-utils';
 
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
 import ToastMessages, { $imports } from '../ToastMessages';
 import { checkAccessibility } from '../../../test-util/accessibility';
@@ -55,7 +55,7 @@ describe('ToastMessages', () => {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      '../store': { useSidebarStore: () => fakeStore },
     });
   });
 
@@ -76,29 +76,29 @@ describe('ToastMessages', () => {
   });
 
   describe('`ToastMessage` sub-component', () => {
-    it('should add `is-dismissed` stateful class name if message has been dismissed', () => {
-      const message = fakeSuccessMessage();
-      message.isDismissed = true;
-      fakeStore.getToastMessages.returns([message]);
-
-      const wrapper = createComponent();
-      const messageContainer = wrapper.find('ToastMessage li');
-
-      assert.isTrue(messageContainer.hasClass('is-dismissed'));
-    });
-
     it('should dismiss the message when clicked', () => {
       fakeStore.getToastMessages.returns([fakeSuccessMessage()]);
 
       const wrapper = createComponent();
 
-      const messageContainer = wrapper.find('ToastMessage li');
+      const messageContainer = wrapper.find('ToastMessage').getDOMNode();
 
       act(() => {
-        messageContainer.simulate('click');
+        messageContainer.dispatchEvent(new Event('click'));
       });
 
       assert.calledOnce(fakeToastMessenger.dismiss);
+    });
+
+    it('should set a screen-reader-only class on `visuallyHidden` messages', () => {
+      const message = fakeSuccessMessage();
+      message.visuallyHidden = true;
+      fakeStore.getToastMessages.returns([message]);
+
+      const wrapper = createComponent();
+
+      const messageContainer = wrapper.find('ToastMessage').getDOMNode();
+      assert.include(messageContainer.className, 'sr-only');
     });
 
     it('should not dismiss the message if a "More info" link is clicked', () => {
@@ -106,7 +106,7 @@ describe('ToastMessages', () => {
 
       const wrapper = createComponent();
 
-      const link = wrapper.find('.toast-message__link a');
+      const link = wrapper.find('Link');
 
       act(() => {
         link.getDOMNode().dispatchEvent(new Event('click', { bubbles: true }));
@@ -116,38 +116,19 @@ describe('ToastMessages', () => {
     });
 
     [
-      { message: fakeSuccessMessage(), className: 'toast-message--success' },
-      { message: fakeErrorMessage(), className: 'toast-message--error' },
-      { message: fakeNoticeMessage(), className: 'toast-message--notice' },
+      { message: fakeSuccessMessage(), prefix: 'Success: ' },
+      { message: fakeErrorMessage(), prefix: 'Error: ' },
+      { message: fakeNoticeMessage(), prefix: '' },
     ].forEach(testCase => {
-      it('should assign a CSS class based on message type', () => {
+      it('should prefix the message with the message type', () => {
         fakeStore.getToastMessages.returns([testCase.message]);
 
         const wrapper = createComponent();
 
-        const messageWrapper = wrapper.find('.toast-message');
-
-        assert.isTrue(messageWrapper.hasClass(testCase.className));
-      });
-
-      [
-        { message: fakeSuccessMessage(), prefix: 'Success' },
-        { message: fakeErrorMessage(), prefix: 'Error' },
-      ].forEach(testCase => {
-        it('should prefix the message with the message type', () => {
-          fakeStore.getToastMessages.returns([testCase.message]);
-
-          const wrapper = createComponent();
-
-          const messageContent = wrapper
-            .find('.toast-message__message')
-            .first();
-
-          assert.equal(
-            messageContent.text(),
-            `${testCase.prefix}: ${testCase.message.message}`
-          );
-        });
+        assert.include(
+          wrapper.text(),
+          `${testCase.prefix}${testCase.message.message}`
+        );
       });
     });
 
@@ -166,7 +147,7 @@ describe('ToastMessages', () => {
         const wrapper = createComponent();
 
         const iconProps = wrapper
-          .find('SvgIcon')
+          .find('Icon')
           .map(iconWrapper => iconWrapper.props().name);
 
         assert.deepEqual(iconProps, testCase.icons);
@@ -179,7 +160,7 @@ describe('ToastMessages', () => {
 
     const wrapper = createComponent();
 
-    const link = wrapper.find('.toast-message__link a');
+    const link = wrapper.find('Link');
     assert.equal(link.props().href, 'http://www.example.com');
     assert.equal(link.text(), 'More info');
   });

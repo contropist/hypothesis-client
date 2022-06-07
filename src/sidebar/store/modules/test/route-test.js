@@ -1,11 +1,11 @@
-import createStore from '../../create-store';
-import route from '../route';
+import { createStore } from '../../create-store';
+import { routeModule } from '../route';
 
 describe('store/modules/route', () => {
   let store;
 
   beforeEach(() => {
-    store = createStore([route]);
+    store = createStore([routeModule]);
   });
 
   it('sets initial route to `null`', () => {

@@ -1,65 +1,33 @@
-import { confirm, $imports } from '../prompts';
-
-function FakeConfirmDialog({
-  confirmAction,
-  message,
-  onCancel,
-  onConfirm,
-  title,
-}) {
-  return (
-    <div>
-      <h1>{title}</h1>
-      <p>{message}</p>
-      <button data-testid="confirm" onClick={onConfirm}>
-        {confirmAction}
-      </button>
-      <button data-testid="cancel" onClick={onCancel}>
-        Cancel
-      </button>
-    </div>
-  );
-}
+import { confirm } from '../prompts';
 
 describe('shared/prompts', () => {
   describe('confirm', () => {
-    beforeEach(() => {
-      sinon.stub(window, 'confirm').returns(false);
+    function clickClose() {
+      const closeButton = getCustomDialog().querySelector(
+        '[aria-label="Close"]'
+      );
+      closeButton.click();
+    }
 
-      $imports.$mock({
-        './components/ConfirmDialog': FakeConfirmDialog,
-      });
-    });
+    function clickCancel() {
+      const cancelButton = getCustomDialog().querySelector(
+        '[data-testid="cancel-button"]'
+      );
+      cancelButton.click();
+    }
 
-    afterEach(() => {
-      window.confirm.restore();
-    });
+    function clickConfirm() {
+      const confirmButton = getCustomDialog().querySelector(
+        '[data-testid="confirm-button"]'
+      );
+      confirmButton.click();
+    }
 
     function getCustomDialog() {
       return document.querySelector('[data-testid="confirm-container"]');
     }
 
-    function clickConfirm() {
-      const confirmButton = getCustomDialog().querySelector(
-        '[data-testid="confirm"]'
-      );
-      confirmButton.click();
-    }
-
-    function clickCancel() {
-      const cancelButton = getCustomDialog().querySelector(
-        '[data-testid="cancel"]'
-      );
-      cancelButton.click();
-    }
-
-    it('uses `window.confirm` if available', async () => {
-      window.confirm.returns(true);
-      const result = await confirm({ message: 'Do the thing?' });
-      assert.equal(result, true);
-    });
-
-    it('renders a custom dialog if `window.confirm` is not available', async () => {
+    it('renders a custom dialog', async () => {
       const result = confirm({
         title: 'Confirm action?',
         message: 'Do the thing?',
@@ -68,17 +36,11 @@ describe('shared/prompts', () => {
       const dialog = getCustomDialog();
 
       assert.ok(dialog);
-      assert.equal(dialog.querySelector('h1').textContent, 'Confirm action?');
-      assert.equal(dialog.querySelector('p').textContent, 'Do the thing?');
-      assert.equal(
-        dialog.querySelector('[data-testid=confirm]').textContent,
-        'Yeah!'
-      );
 
-      clickConfirm();
-      await result;
+      clickClose();
 
       assert.notOk(getCustomDialog());
+      assert.isFalse(await result);
     });
 
     it('returns true if "Confirm" button is clicked', async () => {

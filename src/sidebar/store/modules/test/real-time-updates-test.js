@@ -1,12 +1,11 @@
-import createStore from '../../create-store';
-import annotations from '../annotations';
-import groups from '../groups';
-import realTimeUpdates from '../real-time-updates';
-import { $imports } from '../real-time-updates';
-import selection from '../selection';
+import { createStore } from '../../create-store';
+import { annotationsModule } from '../annotations';
+import { groupsModule } from '../groups';
+import { realTimeUpdatesModule, $imports } from '../real-time-updates';
+import { selectionModule } from '../selection';
 
-const { removeAnnotations } = annotations.actions;
-const { focusGroup } = groups.actions;
+const { removeAnnotations } = annotationsModule.actionCreators;
+const { focusGroup } = groupsModule.actionCreators;
 
 describe('sidebar/store/modules/real-time-updates', () => {
   let fakeAnnotationExists;
@@ -32,23 +31,23 @@ describe('sidebar/store/modules/real-time-updates', () => {
     });
 
     store = createStore(
-      [realTimeUpdates, annotations, selection],
+      [realTimeUpdatesModule, annotationsModule, selectionModule],
       [fakeSettings]
     );
 
     $imports.$mock({
       './annotations': {
-        default: {
+        annotationsModule: {
           selectors: { annotationExists: fakeAnnotationExists },
         },
       },
       './groups': {
-        default: {
+        groupsModule: {
           selectors: { focusedGroupId: fakeFocusedGroupId },
         },
       },
       './route': {
-        default: {
+        routeModule: {
           selectors: { route: fakeRoute },
         },
       },

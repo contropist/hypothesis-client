@@ -1,12 +1,15 @@
-import { actionTypes } from '../util';
 import { replaceURLParams } from '../../util/url';
-import { storeModule } from '../create-store';
+import { createStoreModule, makeAction } from '../create-store';
 
-function init() {
-  return null;
-}
+const initialState = /** @type {Record<string, string>|null} */ (null);
 
-const update = {
+/** @typedef {typeof initialState} State */
+
+const reducers = {
+  /**
+   * @param {State} state
+   * @param {{ links: Record<string, string> }} action
+   */
   UPDATE_LINKS(state, action) {
     return {
       ...action.links,
@@ -14,18 +17,13 @@ const update = {
   },
 };
 
-const actions = actionTypes(update);
-
 /**
  * Update the link map
  *
  * @param {Record<string, string>} links - Link map fetched from the `/api/links` endpoint
  */
 function updateLinks(links) {
-  return {
-    type: actions.UPDATE_LINKS,
-    links,
-  };
+  return makeAction(reducers, 'UPDATE_LINKS', { links });
 }
 
 /**
@@ -33,9 +31,9 @@ function updateLinks(links) {
  *
  * Returns an empty string if links have not been fetched yet.
  *
+ * @param {State} state
  * @param {string} linkName
  * @param {Record<string, string>} [params]
- * @return {string}
  */
 function getLink(state, linkName, params = {}) {
   if (!state) {
@@ -53,11 +51,10 @@ function getLink(state, linkName, params = {}) {
   return url;
 }
 
-export default storeModule({
-  init,
+export const linksModule = createStoreModule(initialState, {
   namespace: 'links',
-  update,
-  actions: {
+  reducers,
+  actionCreators: {
     updateLinks,
   },
   selectors: {

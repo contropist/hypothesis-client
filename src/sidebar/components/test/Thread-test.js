@@ -5,7 +5,7 @@ import Thread from '../Thread';
 import { $imports } from '../Thread';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
 // Utility functions to build nested threads
 let lastThreadId = 0;
@@ -77,10 +77,14 @@ describe('Thread', () => {
     );
   };
 
+  const childListSelector = 'ul[data-testid="thread-children"]';
+
   beforeEach(() => {
     fakeStore = {
       hasAppliedFilter: sinon.stub().returns(false),
       setExpanded: sinon.stub(),
+      isSavingAnnotation: sinon.stub().returns(false),
+      getDraft: sinon.stub().returns(false),
     };
 
     fakeThreadsService = {
@@ -94,7 +98,7 @@ describe('Thread', () => {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      '../store': { useSidebarStore: () => fakeStore },
       '../helpers/thread': fakeThreadUtil,
     });
   });
@@ -136,12 +140,6 @@ describe('Thread', () => {
       assert.calledOnce(fakeStore.setExpanded);
       assert.calledWith(fakeStore.setExpanded, replyThread.id, false);
     });
-
-    it('assigns an appropriate CSS class to the element', () => {
-      const wrapper = createComponent({ thread: replyThread });
-
-      assert.isTrue(wrapper.find('.Thread').hasClass('Thread--reply'));
-    });
   });
 
   context('visible thread with annotation', () => {
@@ -160,18 +158,51 @@ describe('Thread', () => {
     });
   });
 
+  describe('toggling replies for top-level threads', () => {
+    it('provides an `onToggleReplies` callback for top-level threads with replies', () => {
+      const threadWithChildren = buildThreadWithChildren();
+      const wrapper = createComponent({ thread: threadWithChildren });
+      assert.isFunction(wrapper.find('Annotation').props().onToggleReplies);
+    });
+
+    it('does not provide a toggle callback if thread is being edited', () => {
+      fakeStore.getDraft.returns({});
+      const threadWithChildren = buildThreadWithChildren();
+
+      const wrapper = createComponent({ thread: threadWithChildren });
+      assert.isUndefined(wrapper.find('Annotation').props().onToggleReplies);
+    });
+
+    it('does not provide a toggle callback if thread is a reply', () => {
+      const threadWithChildren = buildThreadWithChildren();
+      threadWithChildren.parent = 1;
+
+      const wrapper = createComponent({ thread: threadWithChildren });
+      assert.isUndefined(wrapper.find('Annotation').props().onToggleReplies);
+    });
+
+    it('does not provide a toggle callback if there is an applied filter', () => {
+      fakeStore.hasAppliedFilter.returns(true);
+      const threadWithChildren = buildThreadWithChildren();
+
+      const wrapper = createComponent({ thread: threadWithChildren });
+      assert.isUndefined(wrapper.find('Annotation').props().onToggleReplies);
+    });
+
+    it('does not provide a toggle callback if there are no replies', () => {
+      const thread = createThread();
+      const wrapper = createComponent({ thread });
+
+      assert.isUndefined(wrapper.find('Annotation').props().onToggleReplies);
+    });
+  });
+
   context('collapsed thread with annotation and children', () => {
     let collapsedThread;
 
     beforeEach(() => {
       collapsedThread = buildThreadWithChildren();
       collapsedThread.collapsed = true;
-    });
-
-    it('assigns an appropriate CSS class to the element', () => {
-      const wrapper = createComponent({ thread: collapsedThread });
-      assert.isTrue(wrapper.find('.Thread').hasClass('is-collapsed'));
-      assert.isFalse(wrapper.find('.Thread__collapse-button').exists());
     });
 
     it('renders reply toggle controls when thread has a parent', () => {
@@ -186,7 +217,7 @@ describe('Thread', () => {
     it('does not render child threads', () => {
       const wrapper = createComponent({ thread: collapsedThread });
 
-      assert.isFalse(wrapper.find('.Thread__children').exists());
+      assert.isFalse(wrapper.find(childListSelector).exists());
     });
   });
 
@@ -201,7 +232,7 @@ describe('Thread', () => {
     it('renders an annotation component', () => {
       const wrapper = createComponent({ thread: noAnnotationThread });
 
-      const annotation = wrapper.find('Annotation');
+      const annotation = wrapper.find('EmptyAnnotation');
 
       assert.isTrue(annotation.exists());
     });
@@ -239,6 +270,29 @@ describe('Thread', () => {
       assert.calledOnce(fakeThreadsService.forceVisible);
       assert.calledWith(fakeThreadsService.forceVisible, thread);
     });
+
+    it('shows the annotation header on a hidden top-level thread', () => {
+      const thread = createThread();
+      const wrapper = createComponent({ thread });
+
+      assert.isTrue(wrapper.find('AnnotationHeader').exists());
+    });
+
+    it("doesn't show the annotation header if top-level annotation is missing", () => {
+      const thread = createThread();
+      thread.annotation = null;
+      const wrapper = createComponent({ thread });
+
+      assert.isFalse(wrapper.find('AnnotationHeader').exists());
+    });
+
+    it("doesn't show the annotation header if thread is a child", () => {
+      const thread = createThread();
+      thread.parent = {}; // child threads have a parent
+      const wrapper = createComponent({ thread });
+
+      assert.isFalse(wrapper.find('AnnotationHeader').exists());
+    });
   });
 
   context('thread with child threads', () => {
@@ -254,7 +308,7 @@ describe('Thread', () => {
       const wrapper = createComponent({ thread: threadWithChildren });
 
       assert.equal(
-        wrapper.find('.Thread__children').find('Thread').length,
+        wrapper.find(childListSelector).find('Thread').length,
         threadWithChildren.replyCount
       );
     });
@@ -269,7 +323,7 @@ describe('Thread', () => {
       // The number of children that end up getting rendered is equal to
       // all of the second child's replies plus the second child itself.
       assert.equal(
-        wrapper.find('.Thread__children').find('Thread').length,
+        wrapper.find(childListSelector).find('Thread').length,
         threadWithChildren.children[1].replyCount + 1
       );
     });

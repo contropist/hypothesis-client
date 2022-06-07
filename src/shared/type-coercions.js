@@ -44,7 +44,7 @@ export function toInteger(value) {
  * Returns either the value if its an object or an empty object
  *
  * @param {any} value - initial value
- * @return {Object}
+ * @return {object}
  */
 export function toObject(value) {
   if (typeof value === 'object' && value !== null) {
@@ -66,4 +66,26 @@ export function toString(value) {
     return value.toString();
   }
   return '';
+}
+
+/**
+ * @template T
+ * @typedef {import('preact').Ref<T>} Ref
+ */
+
+/**
+ * Helper for downcasting a ref to a more specific type, where that is safe
+ * to do.
+ *
+ * This is mainly useful to cast a generic `Ref<HTMLElement>` to a more specific
+ * element type (eg. `Ref<HTMLDivElement>`) for use with the `ref` prop of a JSX element.
+ * Since Preact only writes to the `ref` prop, such a cast is safe.
+ *
+ * @template T
+ * @template {T} U
+ * @param {Ref<T>|undefined} ref
+ * @return {Ref<U>|undefined}
+ */
+export function downcastRef(ref) {
+  return /** @type {Ref<U>|undefined} */ (ref);
 }

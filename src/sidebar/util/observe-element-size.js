@@ -1,4 +1,4 @@
-import { ListenerCollection } from '../../annotator/util/listener-collection';
+import { ListenerCollection } from '../../shared/listener-collection';
 
 /**
  * Watch for changes in the size (`clientWidth` and `clientHeight`) of
@@ -8,12 +8,12 @@ import { ListenerCollection } from '../../annotator/util/listener-collection';
  * updates are no longer needed.
  *
  * @param {Element} element - HTML element to watch
- * @param {(width: number, height: number) => any} onSizeChanged -
+ * @param {(width: number, height: number) => void} onSizeChanged -
  *   Callback to invoke with the `clientWidth` and `clientHeight` of the
  *   element when a change in its size is detected.
  * @return {() => void}
  */
-export default function observeElementSize(element, onSizeChanged) {
+export function observeElementSize(element, onSizeChanged) {
   if (typeof ResizeObserver !== 'undefined') {
     const observer = new ResizeObserver(() =>
       onSizeChanged(element.clientWidth, element.clientHeight)

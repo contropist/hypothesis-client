@@ -4,12 +4,15 @@ import { act } from 'preact/test-utils';
 import Menu from '../Menu';
 import { $imports } from '../Menu';
 
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 import { checkAccessibility } from '../../../test-util/accessibility';
 
 describe('Menu', () => {
   let container;
-  let clock;
+
+  const menuSelector = '[data-testid="menu-container"]';
+  const contentSelector = '[data-testid="menu-content"]';
+  const toggleSelector = 'button[data-testid="menu-toggle-button"]';
 
   const TestLabel = () => 'Test label';
   const TestMenuItem = () => 'Test item';
@@ -26,7 +29,7 @@ describe('Menu', () => {
   };
 
   function isOpen(wrapper) {
-    return wrapper.exists('.Menu__content');
+    return wrapper.exists(contentSelector);
   }
 
   beforeEach(() => {
@@ -39,18 +42,14 @@ describe('Menu', () => {
   afterEach(() => {
     $imports.$restore();
     container.remove();
-    if (clock) {
-      clock.restore();
-      clock = null;
-    }
   });
 
   it('opens and closes when the toggle button is clicked', () => {
     const wrapper = createMenu();
     assert.isFalse(isOpen(wrapper));
-    wrapper.find('button').simulate('click');
+    wrapper.find(toggleSelector).simulate('click');
     assert.isTrue(isOpen(wrapper));
-    wrapper.find('button').simulate('click');
+    wrapper.find(toggleSelector).simulate('click');
     assert.isFalse(isOpen(wrapper));
   });
 
@@ -61,16 +60,16 @@ describe('Menu', () => {
 
     assert.isTrue(isOpen(wrapper));
 
-    wrapper.find('button').simulate('click');
+    wrapper.find(toggleSelector).simulate('click');
     assert.isTrue(isOpen(wrapper));
   });
 
   it('calls `onOpenChanged` prop when menu is opened or closed', () => {
     const onOpenChanged = sinon.stub();
     const wrapper = createMenu({ onOpenChanged });
-    wrapper.find('button').simulate('click');
+    wrapper.find(toggleSelector).simulate('click');
     assert.calledWith(onOpenChanged, true);
-    wrapper.find('button').simulate('click');
+    wrapper.find(toggleSelector).simulate('click');
     assert.calledWith(onOpenChanged, false);
   });
 
@@ -78,9 +77,9 @@ describe('Menu', () => {
     const wrapper = createMenu();
     assert.isFalse(isOpen(wrapper));
 
-    wrapper.find('button').simulate('mousedown');
+    wrapper.find(toggleSelector).simulate('mousedown');
     // Make sure the follow-up click doesn't close the menu.
-    wrapper.find('button').simulate('click');
+    wrapper.find(toggleSelector).simulate('click');
 
     assert.isTrue(isOpen(wrapper));
   });
@@ -99,12 +98,6 @@ describe('Menu', () => {
   it('renders menu items when open', () => {
     const wrapper = createMenu({ defaultOpen: true });
     assert.isTrue(wrapper.exists(TestMenuItem));
-  });
-
-  it('flips toggle arrow when open', () => {
-    const wrapper = createMenu({ defaultOpen: true });
-    const toggle = wrapper.find('.Menu__toggle-arrow');
-    assert.isTrue(toggle.hasClass('is-open'));
   });
 
   let e;
@@ -141,13 +134,13 @@ describe('Menu', () => {
 
   it('does not close menu if user presses mouse on menu content', () => {
     const wrapper = createMenu({ defaultOpen: true });
-    let content = wrapper.find('.Menu__content');
+    let content = wrapper.find(contentSelector);
     act(() => {
       content
         .getDOMNode()
         .dispatchEvent(new Event('mousedown', { bubbles: true }));
       wrapper.update();
-      content = wrapper.find('.Menu__content');
+      content = wrapper.find(contentSelector);
     });
     assert.isTrue(isOpen(wrapper));
   });
@@ -182,16 +175,20 @@ describe('Menu', () => {
     it(`${
       shouldClose ? 'closes' : "doesn't close"
     } when user performs a "${eventType}" (key: "${key}") on menu content`, () => {
-      clock = sinon.useFakeTimers();
-      const wrapper = createMenu({ defaultOpen: true });
-      wrapper.find('.Menu__content').simulate(eventType, { key });
-      // The close event is delayed by a minimal amount of time in
-      // order to allow links to say in the DOM long enough to be
-      // followed on a click. Therefore, this test must simulate
-      // time passing in order for the menu to close.
-      clock.tick(1);
-      wrapper.update();
-      assert.equal(isOpen(wrapper), !shouldClose);
+      const clock = sinon.useFakeTimers();
+      try {
+        const wrapper = createMenu({ defaultOpen: true });
+        wrapper.find(contentSelector).simulate(eventType, { key });
+        // The close event is delayed by a minimal amount of time in
+        // order to allow links to say in the DOM long enough to be
+        // followed on a click. Therefore, this test must simulate
+        // time passing in order for the menu to close.
+        clock.tick(1);
+        wrapper.update();
+        assert.equal(isOpen(wrapper), !shouldClose);
+      } finally {
+        clock.restore();
+      }
     });
   });
 
@@ -200,19 +197,20 @@ describe('Menu', () => {
 
     // The event may be received either by the top `<div>` or the arrow element
     // itself.
-    wrapper.find('.Menu').simulate('mousedown');
-    wrapper.find('.Menu__arrow').simulate('mousedown');
+    wrapper.find(menuSelector).simulate('mousedown');
+
+    assert.isTrue(isOpen(wrapper));
   });
 
   it('aligns menu content depending on `align` prop', () => {
     const wrapper = createMenu({ defaultOpen: true });
-    assert.isTrue(wrapper.exists('.Menu__content--align-left'));
+    assert.isTrue(wrapper.find(contentSelector).hasClass('left-0'));
 
     wrapper.setProps({ align: 'left' });
-    assert.isTrue(wrapper.exists('.Menu__content--align-left'));
+    assert.isTrue(wrapper.find(contentSelector).hasClass('left-0'));
 
     wrapper.setProps({ align: 'right' });
-    assert.isTrue(wrapper.exists('.Menu__content--align-right'));
+    assert.isTrue(wrapper.find(contentSelector).hasClass('right-0'));
   });
 
   it('applies custom content class', () => {
@@ -220,7 +218,7 @@ describe('Menu', () => {
       defaultOpen: true,
       contentClass: 'special-menu',
     });
-    const content = wrapper.find('.Menu__content');
+    const content = wrapper.find(contentSelector);
     assert.isTrue(content.hasClass('special-menu'));
   });
 
@@ -229,16 +227,16 @@ describe('Menu', () => {
       arrowClass: 'my-arrow-class',
       defaultOpen: true,
     });
-    const arrow = wrapper.find('.Menu__arrow');
+    const arrow = wrapper.find('MenuArrow');
 
-    assert.isTrue(arrow.hasClass('my-arrow-class'));
+    assert.include(arrow.props().classes, 'my-arrow-class');
   });
 
   it('has relative positioning if `containerPositioned` is `true`', () => {
     const wrapper = createMenu({
       containerPositioned: true, // default
     });
-    const menuContainer = wrapper.find('.Menu');
+    const menuContainer = wrapper.find(menuSelector);
 
     assert.include({ position: 'relative' }, menuContainer.prop('style'));
   });
@@ -247,7 +245,7 @@ describe('Menu', () => {
     const wrapper = createMenu({
       containerPositioned: false,
     });
-    const menuContainer = wrapper.find('.Menu');
+    const menuContainer = wrapper.find(menuSelector);
 
     assert.include({ position: 'static' }, menuContainer.prop('style'));
   });

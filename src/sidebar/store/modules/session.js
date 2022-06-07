@@ -1,9 +1,8 @@
-import * as util from '../util';
-
-import { storeModule } from '../create-store';
+import { createStoreModule, makeAction } from '../create-store';
 
 /**
  * @typedef {import('../../../types/api').Profile} Profile
+ * @typedef {import('../../../types/config').SidebarSettings} SidebarSettings
  */
 
 /**
@@ -23,7 +22,14 @@ const initialProfile = {
   userid: null,
 };
 
-function init(settings) {
+/**
+ * @typedef State
+ * @prop {string} defaultAuthority
+ * @prop {Profile} profile
+ */
+
+/** @param {SidebarSettings} settings */
+function initialState(settings) {
   return {
     /**
      * The app's default authority (user identity provider), from settings,
@@ -41,29 +47,29 @@ function init(settings) {
   };
 }
 
-const update = {
-  UPDATE_PROFILE: function (state, action) {
+const reducers = {
+  /**
+   * @param {State} state
+   * @param {{ profile: Profile }} action
+   */
+  UPDATE_PROFILE(state, action) {
     return {
       profile: { ...action.profile },
     };
   },
 };
 
-const actions = util.actionTypes(update);
-
 /**
  * Update the profile information for the current user.
+ *
+ * @param {Profile} profile
  */
 function updateProfile(profile) {
-  return {
-    type: actions.UPDATE_PROFILE,
-    profile,
-  };
+  return makeAction(reducers, 'UPDATE_PROFILE', { profile });
 }
 
 /**
- *
- * @return {string}
+ * @param {State} state
  */
 function defaultAuthority(state) {
   return state.defaultAuthority;
@@ -72,7 +78,7 @@ function defaultAuthority(state) {
 /**
  * Return true if a user is logged in and false otherwise.
  *
- * @param {object} state - The application state
+ * @param {State} state
  */
 function isLoggedIn(state) {
   return state.profile.userid !== null;
@@ -81,7 +87,7 @@ function isLoggedIn(state) {
 /**
  * Return true if a given feature flag is enabled for the current user.
  *
- * @param {object} state - The application state
+ * @param {State} state
  * @param {string} feature - The name of the feature flag. This matches the
  *        name of the feature flag as declared in the Hypothesis service.
  */
@@ -93,6 +99,8 @@ function isFeatureEnabled(state, feature) {
  * Return true if the user's profile has been fetched. This can be used to
  * distinguish the dummy profile returned by `profile()` on startup from a
  * logged-out user profile returned by the server.
+ *
+ * @param {State} state
  */
 function hasFetchedProfile(state) {
   return state.profile !== initialProfile;
@@ -105,17 +113,18 @@ function hasFetchedProfile(state) {
  *
  * If the profile has not yet been fetched yet, a dummy logged-out profile is
  * returned. This allows code to skip a null check.
+ *
+ * @param {State} state
  */
 function profile(state) {
   return state.profile;
 }
 
-export default storeModule({
-  init,
+export const sessionModule = createStoreModule(initialState, {
   namespace: 'session',
-  update,
+  reducers,
 
-  actions: {
+  actionCreators: {
     updateProfile,
   },
 

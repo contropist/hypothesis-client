@@ -3,7 +3,7 @@ import { mount } from 'enzyme';
 import NotebookFilters from '../NotebookFilters';
 import { $imports } from '../NotebookFilters';
 
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
 describe('NotebookFilters', () => {
   let fakeStore;
@@ -26,7 +26,7 @@ describe('NotebookFilters', () => {
       './hooks/use-filter-options': {
         useUserFilterOptions: fakeUseUserFilterOptions,
       },
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      '../store': { useSidebarStore: () => fakeStore },
     });
   });
 

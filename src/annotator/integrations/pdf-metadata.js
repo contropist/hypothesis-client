@@ -16,6 +16,11 @@ import { normalizeURI } from '../util/url';
  * @prop {string} documentFingerprint - The fingerprint of this PDF. This is
  *   referred to as the "File Identifier" in the PDF spec. It may be a hash of
  *   part of the content if the PDF file does not have a File Identifier.
+ *
+ *   PDFs may have two file identifiers. The first is the "original" identifier
+ *   which is not supposed to change if the file is updated and the second
+ *   one is the "last modified" identifier. This property is the original
+ *   identifier.
  */
 
 /**
@@ -117,7 +122,7 @@ export class PDFMetadata {
     return this._loaded.then(app => {
       let uri = getPDFURL(app);
       if (!uri) {
-        uri = fingerprintToURN(app.pdfDocument.fingerprint);
+        uri = fingerprintToURN(getFingerprint(app));
       }
       return uri;
     });
@@ -131,41 +136,83 @@ export class PDFMetadata {
    *
    * @return {Promise<Metadata>}
    */
-  getMetadata() {
-    return this._loaded.then(app => {
-      let title = document.title;
+  async getMetadata() {
+    const app = await this._loaded;
+    const {
+      info: documentInfo,
+      contentDispositionFilename,
+      metadata,
+    } = await app.pdfDocument.getMetadata();
 
-      if (
-        app.metadata &&
-        app.metadata.has('dc:title') &&
-        app.metadata.get('dc:title') !== 'Untitled'
-      ) {
-        title = /** @type {string} */ (app.metadata.get('dc:title'));
-      } else if (app.documentInfo && app.documentInfo.Title) {
-        title = app.documentInfo.Title;
-      }
+    const documentFingerprint = getFingerprint(app);
+    const url = getPDFURL(app);
 
-      const link = [{ href: fingerprintToURN(app.pdfDocument.fingerprint) }];
+    // Return the title metadata embedded in the PDF if available, otherwise
+    // fall back to values from the `Content-Disposition` header or URL.
+    //
+    // PDFs contain two embedded metadata sources, the metadata stream and
+    // the document info dictionary. Per the specification, the metadata stream
+    // is preferred if available.
+    //
+    // This logic is similar to how PDF.js sets `document.title`.
+    let title;
+    if (metadata?.has('dc:title') && metadata.get('dc:title') !== 'Untitled') {
+      title = /** @type {string} */ (metadata.get('dc:title'));
+    } else if (documentInfo?.Title) {
+      title = documentInfo.Title;
+    } else if (contentDispositionFilename) {
+      title = contentDispositionFilename;
+    } else if (url) {
+      title = filenameFromURL(url);
+    } else {
+      title = '';
+    }
 
-      const url = getPDFURL(app);
-      if (url) {
-        link.push({ href: url });
-      }
+    const link = [{ href: fingerprintToURN(documentFingerprint) }];
+    if (url) {
+      link.push({ href: url });
+    }
 
-      return {
-        title: title,
-        link: link,
-        documentFingerprint: app.pdfDocument.fingerprint,
-      };
-    });
+    return {
+      title,
+      link,
+      documentFingerprint,
+    };
   }
 }
 
-function fingerprintToURN(fingerprint) {
-  return 'urn:x-pdf:' + String(fingerprint);
+/**
+ * Get the fingerprint/file identifier of the currently loaded PDF.
+ *
+ * @param {PDFViewerApplication} app
+ */
+function getFingerprint(app) {
+  if (Array.isArray(app.pdfDocument.fingerprints)) {
+    return app.pdfDocument.fingerprints[0];
+  } else {
+    return /** @type {string} */ (app.pdfDocument.fingerprint);
+  }
 }
 
+/**
+ * Generate a URI from a PDF fingerprint suitable for storing as the main
+ * or associated URI of an annotation.
+ *
+ * @param {string} fingerprint
+ */
+function fingerprintToURN(fingerprint) {
+  return `urn:x-pdf:${fingerprint}`;
+}
+
+/**
+ * @param {PDFViewerApplication} app
+ * @return {string|null} - Valid URL string or `null`
+ */
 function getPDFURL(app) {
+  if (!app.url) {
+    return null;
+  }
+
   const url = normalizeURI(app.url);
 
   // Local file:// URLs should not be saved in document metadata.
@@ -176,4 +223,16 @@ function getPDFURL(app) {
   }
 
   return null;
+}
+
+/**
+ * Return the last component of the path part of a URL.
+ *
+ * @param {string} url - A valid URL string
+ * @return {string}
+ */
+function filenameFromURL(url) {
+  const parsed = new URL(url);
+  const pathSegments = parsed.pathname.split('/');
+  return pathSegments[pathSegments.length - 1];
 }

@@ -48,25 +48,27 @@ function annotationId(annotation) {
  * Is there a valid path from the thread indicated by `id` to the root thread,
  * with no circular references?
  *
+ * @param {Record<string, Thread>} threads
  * @param {string} id - The id of the thread to be verified
  * @param {string} ancestorId - The ancestor of the thread indicated by id that
  *        is to be verified: is it extant and not a circular reference?
  * @return {boolean}
  */
 function hasPathToRoot(threads, id, ancestorId) {
-  if (!threads[ancestorId] || threads[ancestorId].parent === id) {
+  const ancestor = threads[ancestorId];
+  if (!ancestor || ancestor.parent === id) {
     // Thread for ancestor not found, or points at itself: circular reference
     return false;
-  } else if (!threads[ancestorId].parent) {
+  } else if (!ancestor.parent) {
     // Top of the tree: we've made it
     return true;
   }
-  return hasPathToRoot(threads, id, threads[ancestorId].parent);
+  return hasPathToRoot(threads, id, ancestor.parent);
 }
 
 /**
  * Link the thread's annotation to its parent
- * @param {Object.<string,Thread>} threads
+ * @param {Record<string,Thread>} threads
  * @param {string} id
  * @param {string[]} [parents] - ids of parent annotations, from the
  *        annotation's `references` field. Immediate parent is last entry.
@@ -111,7 +113,7 @@ function setParent(threads, id, parents = []) {
  * @return {Thread} - The input annotations threaded into a tree structure.
  */
 function threadAnnotations(annotations) {
-  /** @type {Object.<string,Thread>} */
+  /** @type {Record<string,Thread>} */
   const threads = {};
 
   // Create a `Thread` for each annotation
@@ -228,7 +230,7 @@ function hasVisibleChildren(thread) {
 
 /**
  * @typedef BuildThreadOptions
- * @prop {Object.<string, boolean>} expanded - Map of thread id => expansion state
+ * @prop {Record<string, boolean>} expanded - Map of thread id => expansion state
  * @prop {string[]} forcedVisible - List of $tags of annotations that have
  *       been explicitly expanded by the user, even if they don't
  *       match current filters
@@ -284,7 +286,7 @@ const replySortCompareFn = (a, b) => {
  * @return {Thread} - The root thread, whose children are the top-level
  *                    annotations to display.
  */
-export default function buildThread(annotations, options) {
+export function buildThread(annotations, options) {
   const hasSelection = options.selected.length > 0;
   const hasForcedVisible = options.forcedVisible.length > 0;
 

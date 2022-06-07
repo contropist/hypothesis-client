@@ -1,5 +1,5 @@
-import serviceConfig from '../config/service-config';
-import * as retryUtil from '../util/retry';
+import { serviceConfig } from '../config/service-config';
+import { retryPromiseOperation } from '../util/retry';
 import * as sentry from '../util/sentry';
 
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -10,31 +10,33 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
  * This service handles fetching the user's profile, updating profile settings
  * and logging out.
  *
- * Access to the current profile is exposed via the `state` property.
- *
- * @param {import('../store').SidebarStore} store
- * @param {import('./api').APIService} api
- * @param {import('./auth').AuthService} auth
- * @param {import('./toast-messenger').ToastMessengerService} toastMessenger
  * @inject
  */
-export default function session(store, api, auth, settings, toastMessenger) {
-  // Cache the result of load()
-  let lastLoad;
-  let lastLoadTime;
+export class SessionService {
+  /**
+   * @param {import('../store').SidebarStore} store
+   * @param {import('./api').APIService} api
+   * @param {import('./auth').AuthService} auth
+   * @param {import('../../types/config').SidebarSettings} settings
+   * @param {import('./toast-messenger').ToastMessengerService} toastMessenger
+   */
+  constructor(store, api, auth, settings, toastMessenger) {
+    this._api = api;
+    this._auth = auth;
+    this._store = store;
+    this._toastMessenger = toastMessenger;
 
-  // Return the authority from the first service defined in the settings.
-  // Return null if there are no services defined in the settings.
-  function getAuthority() {
-    const service = serviceConfig(settings);
-    if (service === null) {
-      return null;
-    }
-    return service.authority;
+    this._authority = serviceConfig(settings)?.authority ?? null;
+
+    /** @type {Promise<Profile>|null} */
+    this._lastLoad = null;
+
+    /** @type {number|null} */
+    this._lastLoadTime = null;
+
+    // Re-fetch profile when user logs in or out in another tab.
+    auth.on('oauthTokensChanged', () => this.reload());
   }
-
-  // Options to pass to `retry.operation` when fetching the user's profile.
-  const profileFetchRetryOpts = {};
 
   /**
    * Fetch the user's profile from the annotation service.
@@ -44,44 +46,45 @@ export default function session(store, api, auth, settings, toastMessenger) {
    *
    * @return {Promise<Profile>} A promise for the user's profile data.
    */
-  function load() {
-    if (!lastLoadTime || Date.now() - lastLoadTime > CACHE_TTL) {
+  load() {
+    if (
+      !this._lastLoad ||
+      !this._lastLoadTime ||
+      Date.now() - this._lastLoadTime > CACHE_TTL
+    ) {
       // The load attempt is automatically retried with a backoff.
       //
       // This serves to make loading the app in the extension cope better with
       // flakey connectivity but it also throttles the frequency of calls to
       // the /app endpoint.
-      lastLoadTime = Date.now();
-      lastLoad = retryUtil
-        .retryPromiseOperation(function () {
-          const authority = getAuthority();
-          const opts = {};
-          if (authority) {
-            opts.authority = authority;
-          }
-          return api.profile.read(opts);
-        }, profileFetchRetryOpts)
-        .then(function (session) {
-          update(session);
-          lastLoadTime = Date.now();
+      this._lastLoadTime = Date.now();
+      this._lastLoad = retryPromiseOperation(() => {
+        const opts = this._authority ? { authority: this._authority } : {};
+        return this._api.profile.read(opts);
+      })
+        .then(session => {
+          this.update(session);
+          this._lastLoadTime = Date.now();
           return session;
         })
-        .catch(function (err) {
-          lastLoadTime = null;
+        .catch(err => {
+          this._lastLoadTime = null;
           throw err;
         });
     }
-    return lastLoad;
+    return this._lastLoad;
   }
 
   /**
    * Store the preference server-side that the user dismissed the sidebar
    * tutorial and then update the local profile data.
    */
-  function dismissSidebarTutorial() {
-    return api.profile
-      .update({}, { preferences: { show_sidebar_tutorial: false } })
-      .then(update);
+  async dismissSidebarTutorial() {
+    const updatedProfile = await this._api.profile.update(
+      {},
+      { preferences: { show_sidebar_tutorial: false } }
+    );
+    this.update(updatedProfile);
   }
 
   /**
@@ -90,46 +93,43 @@ export default function session(store, api, auth, settings, toastMessenger) {
    * This method can be used to update the profile data in the client when new
    * data is pushed from the server via the real-time API.
    *
-   * @param {Profile} model
+   * @param {Profile} profile
    * @return {Profile} The updated profile data
    */
-  function update(model) {
-    const prevSession = store.profile();
-    const userChanged = model.userid !== prevSession.userid;
+  update(profile) {
+    const prevProfile = this._store.profile();
+    const userChanged = profile.userid !== prevProfile.userid;
 
-    store.updateProfile(model);
+    this._store.updateProfile(profile);
 
-    lastLoad = Promise.resolve(model);
-    lastLoadTime = Date.now();
+    this._lastLoad = Promise.resolve(profile);
+    this._lastLoadTime = Date.now();
 
     if (userChanged) {
       // Associate error reports with the current user in Sentry.
-      if (model.userid) {
+      if (profile.userid) {
         sentry.setUserInfo({
-          id: model.userid,
+          id: profile.userid,
         });
       } else {
         sentry.setUserInfo(null);
       }
     }
 
-    // Return the model
-    return model;
+    return profile;
   }
 
   /**
-   * Log the user out of the current session.
+   * Log the user out of the current session and re-fetch the profile.
    */
-  function logout() {
-    const loggedOut = auth.logout().then(() => {
-      // Re-fetch the logged-out user's profile.
-      return reload();
-    });
-
-    return loggedOut.catch(err => {
-      toastMessenger.error('Log out failed');
+  async logout() {
+    try {
+      await this._auth.logout();
+      return this.reload();
+    } catch (err) {
+      this._toastMessenger.error('Log out failed');
       throw new Error(err);
-    });
+    }
   }
 
   /**
@@ -139,32 +139,9 @@ export default function session(store, api, auth, settings, toastMessenger) {
    *
    * @return {Promise<Profile>}
    */
-  function reload() {
-    lastLoad = null;
-    lastLoadTime = null;
-    return load();
+  reload() {
+    this._lastLoad = null;
+    this._lastLoadTime = null;
+    return this.load();
   }
-
-  auth.on('oauthTokensChanged', () => {
-    reload();
-  });
-
-  return {
-    dismissSidebarTutorial,
-    load,
-    logout,
-    reload,
-
-    // Exposed for use in tests
-    profileFetchRetryOpts,
-
-    // For the moment, we continue to expose the session state as a property on
-    // this service. In future, other services which access the session state
-    // will do so directly from store or via selector functions
-    get state() {
-      return store.profile();
-    },
-
-    update,
-  };
 }

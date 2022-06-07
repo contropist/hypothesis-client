@@ -1,33 +1,34 @@
-import { SvgIcon } from '@hypothesis/frontend-shared';
+import { Icon } from '@hypothesis/frontend-shared';
 import { useState } from 'preact/hooks';
 
-import bridgeEvents from '../../shared/bridge-events';
-import serviceConfig from '../config/service-config';
+import { serviceConfig } from '../config/service-config';
 import { isThirdPartyUser } from '../helpers/account-id';
-import { useStoreProxy } from '../store/use-store';
 import { withServices } from '../service-context';
+import { useSidebarStore } from '../store';
 
 import Menu from './Menu';
 import MenuItem from './MenuItem';
 import MenuSection from './MenuSection';
 
 /**
- * @typedef {import('../../types/config').MergedConfig} MergedConfig
+ * @typedef {import('../../types/config').SidebarSettings} SidebarSettings
  * /
 
 /**
- * @typedef AuthState
+ * @typedef AuthStateLoggedIn
+ * @prop {'logged-in'} status
  * @prop {string} displayName
  * @prop {string} userid
  * @prop {string} username
+ * @typedef {{status: 'logged-out'|'unknown'} | AuthStateLoggedIn}  AuthState
  */
 
 /**
  * @typedef UserMenuProps
- * @prop {AuthState} auth - object representing authenticated user and auth status
- * @prop {() => any} onLogout - onClick callback for the "log out" button
- * @prop {Object} bridge
- * @prop {MergedConfig} settings
+ * @prop {AuthStateLoggedIn} auth - object representing authenticated user and auth status
+ * @prop {() => void} onLogout - onClick callback for the "log out" button
+ * @prop {import('../services/frame-sync').FrameSyncService} frameSync
+ * @prop {SidebarSettings} settings
  */
 
 /**
@@ -38,15 +39,15 @@ import MenuSection from './MenuSection';
  *
  * @param {UserMenuProps} props
  */
-function UserMenu({ auth, bridge, onLogout, settings }) {
-  const store = useStoreProxy();
+function UserMenu({ auth, frameSync, onLogout, settings }) {
+  const store = useSidebarStore();
   const defaultAuthority = store.defaultAuthority();
 
   const isThirdParty = isThirdPartyUser(auth.userid, defaultAuthority);
   const service = serviceConfig(settings);
-  const isNotebookEnabled = store.isFeatureEnabled('notebook_launch');
   const [isOpen, setOpen] = useState(false);
 
+  /** @param {keyof import('../../types/config').Service} feature */
   const serviceSupports = feature => service && !!service[feature];
 
   const isSelectableProfile =
@@ -55,11 +56,13 @@ function UserMenu({ auth, bridge, onLogout, settings }) {
     !isThirdParty || serviceSupports('onLogoutRequestProvided');
 
   const onSelectNotebook = () => {
-    bridge.call('openNotebook', store.focusedGroupId());
+    frameSync.notifyHost('openNotebook', store.focusedGroupId());
   };
 
   // Temporary access to the Notebook without feature flag:
   // type the key 'n' when user menu is focused/open
+
+  /** @param {KeyboardEvent} event */
   const onKeyDown = event => {
     if (event.key === 'n') {
       onSelectNotebook();
@@ -68,7 +71,7 @@ function UserMenu({ auth, bridge, onLogout, settings }) {
   };
 
   const onProfileSelected = () =>
-    isThirdParty && bridge.call(bridgeEvents.PROFILE_REQUESTED);
+    isThirdParty && frameSync.notifyHost('profileRequested');
 
   // Generate dynamic props for the profile <MenuItem> component
   const profileItemProps = (() => {
@@ -83,14 +86,14 @@ function UserMenu({ auth, bridge, onLogout, settings }) {
   })();
 
   const menuLabel = (
-    <span className="TopBar__menu-label">
-      <SvgIcon name="profile" className="TopBar__menu-icon" />
+    <span className="p-1">
+      <Icon name="profile" />
     </span>
   );
   return (
-    // FIXME: KeyDown handling is temporary for Notebook "easter egg"
+    // Allow keyboard shortcut 'n' to open Notebook
     /* eslint-disable-next-line jsx-a11y/no-static-element-interactions */
-    <div className="UserMenu" onKeyDown={onKeyDown}>
+    <div data-testid="user-menu" onKeyDown={onKeyDown}>
       <Menu
         label={menuLabel}
         title={auth.displayName}
@@ -110,12 +113,7 @@ function UserMenu({ auth, bridge, onLogout, settings }) {
               href={store.getLink('account.settings')}
             />
           )}
-          {isNotebookEnabled && (
-            <MenuItem
-              label="Open notebook"
-              onClick={() => onSelectNotebook()}
-            />
-          )}
+          <MenuItem label="Open notebook" onClick={() => onSelectNotebook()} />
         </MenuSection>
         {isLogoutEnabled && (
           <MenuSection>
@@ -127,6 +125,4 @@ function UserMenu({ auth, bridge, onLogout, settings }) {
   );
 }
 
-UserMenu.injectedProps = ['bridge', 'settings'];
-
-export default withServices(UserMenu);
+export default withServices(UserMenu, ['frameSync', 'settings']);

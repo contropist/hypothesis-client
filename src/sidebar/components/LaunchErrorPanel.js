@@ -1,4 +1,5 @@
-import Panel from './Panel';
+import { Panel } from '@hypothesis/frontend-shared';
+import classnames from 'classnames';
 
 /**
  * @typedef LaunchErrorPanelProps
@@ -15,10 +16,14 @@ import Panel from './Panel';
  */
 export default function LaunchErrorPanel({ error }) {
   return (
-    <div className="LaunchErrorPanel">
-      <Panel title="Unable to start Hypothesis">
-        <p>{error.message}</p>
-      </Panel>
+    <div
+      className={classnames(
+        // The large top-margin is to ensure the panel clears the close button
+        // in the Notebook
+        'm-2 mt-12'
+      )}
+    >
+      <Panel title="Unable to start Hypothesis">{error.message}</Panel>
     </div>
   );
 }

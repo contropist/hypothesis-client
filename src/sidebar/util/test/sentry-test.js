@@ -1,13 +1,17 @@
 import * as sentry from '../sentry';
 
 describe('sidebar/util/sentry', () => {
-  let fakeDocumentReferrer;
-  let fakeDocumentCurrentScript;
+  let fakeHandleErrorsInFrames;
+  let fakeParseConfigFragment;
   let fakeSentry;
   let fakeWarnOnce;
 
   beforeEach(() => {
+    fakeHandleErrorsInFrames = sinon.stub().returns(() => {});
+    fakeParseConfigFragment = sinon.stub().returns({});
+
     fakeSentry = {
+      captureException: sinon.stub(),
       init: sinon.stub(),
       setExtra: sinon.stub(),
       setUser: sinon.stub(),
@@ -17,7 +21,13 @@ describe('sidebar/util/sentry', () => {
 
     sentry.$imports.$mock({
       '@sentry/browser': fakeSentry,
-      '../../shared/warn-once': fakeWarnOnce,
+      '../../shared/config-fragment': {
+        parseConfigFragment: fakeParseConfigFragment,
+      },
+      '../../shared/frame-error-capture': {
+        handleErrorsInFrames: fakeHandleErrorsInFrames,
+      },
+      '../../shared/warn-once': { warnOnce: fakeWarnOnce },
     });
   });
 
@@ -26,23 +36,15 @@ describe('sidebar/util/sentry', () => {
   });
 
   describe('init', () => {
+    const originalURL = import.meta.url;
+
     beforeEach(() => {
-      fakeDocumentReferrer = sinon.stub(document, 'referrer');
-      fakeDocumentReferrer.get(() => 'https://example.com');
-
-      fakeDocumentCurrentScript = sinon.stub(document, 'currentScript');
-      fakeDocumentCurrentScript.get(() => ({
-        src:
-          'https://cdn.hypothes.is/hypothesis/1.123.0/build/scripts/sidebar.bundle.js',
-      }));
-
       // Reset rate limiting counters.
       sentry.reset();
     });
 
     afterEach(() => {
-      fakeDocumentCurrentScript.restore();
-      fakeDocumentReferrer.restore();
+      import.meta.url = originalURL;
     });
 
     it('configures Sentry', () => {
@@ -62,35 +64,8 @@ describe('sidebar/util/sentry', () => {
     });
 
     it('configures Sentry to only report errors that can be attributed to our code', () => {
-      sentry.init({
-        dsn: 'test-dsn',
-        environment: 'dev',
-      });
-
-      assert.calledWith(
-        fakeSentry.init,
-        sinon.match({
-          whitelistUrls: ['https://cdn.hypothes.is'],
-        })
-      );
-    });
-
-    it('configures Sentry to ignore Errors with matching the text "Fetch operation failed"', () => {
-      sentry.init({
-        dsn: 'test-dsn',
-        environment: 'dev',
-      });
-
-      assert.calledWith(
-        fakeSentry.init,
-        sinon.match({
-          ignoreErrors: ['Fetch operation failed'],
-        })
-      );
-    });
-
-    it('disables the URL whitelist if `document.currentScript` is inaccessible', () => {
-      fakeDocumentCurrentScript.get(() => null);
+      import.meta.url =
+        'https://cdn.hypothes.is/hypothesis/1.940.0/build/scripts/sidebar.bundle.js';
 
       sentry.init({
         dsn: 'test-dsn',
@@ -100,18 +75,65 @@ describe('sidebar/util/sentry', () => {
       assert.calledWith(
         fakeSentry.init,
         sinon.match({
-          whitelistUrls: undefined,
+          allowUrls: ['https://cdn.hypothes.is'],
         })
       );
     });
 
-    it('adds extra context to reports', () => {
+    it('configures Sentry to ignore certain errors', () => {
+      sentry.init({
+        dsn: 'test-dsn',
+        environment: 'dev',
+      });
+
+      assert.calledWith(
+        fakeSentry.init,
+        sinon.match({
+          ignoreErrors: sinon.match.array,
+        })
+      );
+    });
+
+    it('disables the URL allowlist if the script URL is unavailable', () => {
+      import.meta.url = null;
+
+      sentry.init({
+        dsn: 'test-dsn',
+        environment: 'dev',
+      });
+
+      assert.calledWith(
+        fakeSentry.init,
+        sinon.match({
+          allowUrls: undefined,
+        })
+      );
+    });
+
+    it('adds "host_config" context to reports', () => {
+      fakeParseConfigFragment.returns({ appType: 'via' });
+
       sentry.init({ dsn: 'test-dsn', environment: 'dev' });
-      assert.calledWith(
-        fakeSentry.setExtra,
-        'document_url',
-        'https://example.com'
-      );
+
+      assert.calledWith(fakeParseConfigFragment, window.location.href);
+      assert.calledWith(fakeSentry.setExtra, 'host_config', { appType: 'via' });
+    });
+
+    it('does not add "host_config" context if `parseConfigFragment` throws', () => {
+      fakeParseConfigFragment.throws(new Error('Parse error'));
+      sentry.init({ dsn: 'test-dsn', environment: 'dev' });
+      assert.neverCalledWith(fakeSentry.setExtra, 'host_config');
+    });
+
+    it('adds "loaded_scripts" context to reports', () => {
+      sentry.init({ dsn: 'test-dsn', environment: 'dev' });
+      assert.calledWith(fakeSentry.setExtra, 'loaded_scripts');
+
+      const urls = fakeSentry.setExtra
+        .getCalls()
+        .find(call => call.args[0] === 'loaded_scripts').args[1];
+      assert.isTrue(urls.length > 0);
+      urls.forEach(url => assert.match(url, /<inline>|http:.*\.js/));
     });
 
     function getBeforeSendHook() {
@@ -142,7 +164,7 @@ describe('sidebar/util/sentry', () => {
     it('extracts metadata from thrown `Event`s', () => {
       sentry.init({ dsn: 'test-dsn' });
       const beforeSend = getBeforeSendHook();
-      const event = { extra: {} };
+      const event = {};
 
       beforeSend(event, {
         originalException: new CustomEvent('unexpectedevent', {
@@ -162,7 +184,7 @@ describe('sidebar/util/sentry', () => {
     it('ignores errors serializing non-Error exception values', () => {
       sentry.init({ dsn: 'test-dsn' });
       const beforeSend = getBeforeSendHook();
-      const event = { extra: {} };
+      const event = {};
       const originalException = new CustomEvent('unexpectedevent');
       Object.defineProperty(originalException, 'detail', {
         get: () => {
@@ -175,6 +197,21 @@ describe('sidebar/util/sentry', () => {
       // Serializing the custom event detail will fail, so that data will simply
       // be omitted from the report.
       assert.deepEqual(event.extra, {});
+    });
+
+    it('registers a handler for errors in other frames', () => {
+      sentry.init({ dsn: 'test-dsn' });
+
+      assert.calledOnce(fakeHandleErrorsInFrames);
+      const callback = fakeHandleErrorsInFrames.getCall(0).args[0];
+
+      const error = new Error('Some error in host frame');
+      const context = 'some-context';
+      callback(error, context);
+
+      assert.calledWith(fakeSentry.captureException, error, {
+        tags: { context },
+      });
     });
   });
 

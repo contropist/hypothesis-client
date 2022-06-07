@@ -1,14 +1,36 @@
 import { LabeledButton } from '@hypothesis/frontend-shared';
+import classnames from 'classnames';
 
 import { copyText } from '../util/copy-to-clipboard';
 import { withServices } from '../service-context';
 
 /**
  * @typedef VersionInfoProps
- * @prop {import('../helpers/version-data').default} versionData - Object with version information
+ * @prop {import('../helpers/version-data').VersionData} versionData - Object with version information
  * @prop {import('../services/toast-messenger').ToastMessengerService} toastMessenger
  */
 
+/**
+ * @param {object} props
+ *   @param {string} props.label
+ *   @param {import('preact').ComponentChildren} props.children
+ *   @param {string} [props.classes]
+ */
+function VersionInfoItem({ label, children, classes }) {
+  return (
+    <>
+      <dt className="col-span-1 sm:text-right font-medium">{label}</dt>
+      <dd
+        className={classnames(
+          'col-span-1 sm:col-span-3 text-color-text-light break-words',
+          classes
+        )}
+      >
+        {children}
+      </dd>
+    </>
+  );
+}
 /**
  * Display current client version info
  *
@@ -25,22 +47,33 @@ function VersionInfo({ toastMessenger, versionData }) {
   };
 
   return (
-    <div className="u-vertical-rhythm">
-      <dl className="VersionInfo">
-        <dt className="VersionInfo__key">Version</dt>
-        <dd className="VersionInfo__value">{versionData.version}</dd>
-        <dt className="VersionInfo__key">User Agent</dt>
-        <dd className="VersionInfo__value">{versionData.userAgent}</dd>
-        <dt className="VersionInfo__key">URL</dt>
-        <dd className="VersionInfo__value">{versionData.url}</dd>
-        <dt className="VersionInfo__key">Fingerprint</dt>
-        <dd className="VersionInfo__value">{versionData.fingerprint}</dd>
-        <dt className="VersionInfo__key">Account</dt>
-        <dd className="VersionInfo__value">{versionData.account}</dd>
-        <dt className="VersionInfo__key">Date</dt>
-        <dd className="VersionInfo__value">{versionData.timestamp}</dd>
+    <div className="space-y-4">
+      <dl className="grid grid-cols-1 sm:grid-cols-4 sm:gap-x-2">
+        <VersionInfoItem label="Version">{versionData.version}</VersionInfoItem>
+        <VersionInfoItem label="User Agent">
+          {versionData.userAgent}
+        </VersionInfoItem>
+        <VersionInfoItem
+          classes={classnames(
+            // Intermittent odd overflow behavior in Safari causes long strings
+            // with no wrap points to break layout — `overflow-wrap: break-words`
+            // is not reliable in this case. Use `break-all` here, which causes
+            // more inelgant wrapping in all browsers, but is safely contained
+            // in the layout.
+            // See: https://github.com/hypothesis/client/issues/4469
+            'break-all'
+          )}
+          label="URL"
+        >
+          {versionData.urls}
+        </VersionInfoItem>
+        <VersionInfoItem label="Fingerprint">
+          {versionData.fingerprint}
+        </VersionInfoItem>
+        <VersionInfoItem label="Account">{versionData.account}</VersionInfoItem>
+        <VersionInfoItem label="Date">{versionData.timestamp}</VersionInfoItem>
       </dl>
-      <div className="u-layout-row--justify-center">
+      <div className="flex items-center justify-center">
         <LabeledButton onClick={copyVersionData} icon="copy">
           Copy version details
         </LabeledButton>
@@ -49,6 +82,4 @@ function VersionInfo({ toastMessenger, versionData }) {
   );
 }
 
-VersionInfo.injectedProps = ['toastMessenger'];
-
-export default withServices(VersionInfo);
+export default withServices(VersionInfo, ['toastMessenger']);

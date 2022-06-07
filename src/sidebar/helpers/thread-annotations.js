@@ -1,8 +1,8 @@
-import buildThread from './build-thread';
+import { buildThread } from './build-thread';
 
-import memoize from '../util/memoize';
+import { memoize } from '../util/memoize';
 import { generateFacetedFilter } from '../util/search-filter';
-import filterAnnotations from './view-filter';
+import { filterAnnotations } from './view-filter';
 import { shouldShowInTab } from './tabs';
 import { sorters } from './thread-sorters';
 
@@ -13,13 +13,13 @@ import { sorters } from './thread-sorters';
 /**
  * @typedef ThreadState
  * @prop {Annotation[]} annotations
- * @prop {Object} selection
- *   @prop {Object<string,boolean>} selection.expanded
+ * @prop {object} selection
+ *   @prop {Record<string,boolean>} selection.expanded
  *   @prop {string|null} selection.filterQuery
- *   @prop {Object<string,string>} selection.filters
+ *   @prop {Record<string,string>} selection.filters
  *   @prop {string[]} selection.forcedVisible
  *   @prop {string[]} selection.selected
- *   @prop {string} selection.sortKey
+ *   @prop {keyof sorters} selection.sortKey
  *   @prop {'annotation'|'note'|'orphan'} selection.selectedTab
  * @prop {string|null} route
  */
@@ -34,6 +34,7 @@ import { sorters } from './thread-sorters';
 function buildRootThread(threadState) {
   const selection = threadState.selection;
 
+  /** @type {BuildThreadOptions} */
   const options = {
     expanded: selection.expanded,
     forcedVisible: selection.forcedVisible,
@@ -71,6 +72,4 @@ function buildRootThread(threadState) {
   return buildThread(threadState.annotations, options);
 }
 
-const threadAnnotations = memoize(buildRootThread);
-
-export default threadAnnotations;
+export const threadAnnotations = memoize(buildRootThread);

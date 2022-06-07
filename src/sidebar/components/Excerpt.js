@@ -2,15 +2,15 @@ import { LinkButton } from '@hypothesis/frontend-shared';
 import classnames from 'classnames';
 import { useCallback, useLayoutEffect, useRef, useState } from 'preact/hooks';
 
-import observeElementSize from '../util/observe-element-size';
+import { observeElementSize } from '../util/observe-element-size';
 import { withServices } from '../service-context';
 import { applyTheme } from '../helpers/theme';
 
 /**
  * @typedef InlineControlsProps
  * @prop {boolean} isCollapsed
- * @prop {(collapsed: boolean) => any} setCollapsed
- * @prop {Object} [linkStyle]
+ * @prop {(collapsed: boolean) => void} setCollapsed
+ * @prop {Record<string, string>} [linkStyle]
  */
 
 /**
@@ -20,20 +20,32 @@ import { applyTheme } from '../helpers/theme';
  * @param {InlineControlsProps} props
  */
 function InlineControls({ isCollapsed, setCollapsed, linkStyle = {} }) {
-  const toggleLabel = isCollapsed ? 'More' : 'Less';
-
   return (
-    <div className="Excerpt__inline-controls">
-      <div className="Excerpt__toggle-container">
+    <div
+      className={classnames(
+        // Position these controls at the bottom right of the excerpt
+        'absolute block right-0 bottom-0',
+        // Give extra width for larger tap target and gradient fade
+        // Fade transparent-to-white left-to-right to make the toggle
+        // control text (More/Less) more readable above other text.
+        // This gradient is implemented to-left to take advantage of Tailwind's
+        // automatic to-transparent calculation: this avoids Safari's problem
+        // with transparents in gradients:
+        // https://bugs.webkit.org/show_bug.cgi?id=150940
+        // https://tailwindcss.com/docs/gradient-color-stops#fading-to-transparent
+        'w-20 bg-gradient-to-l from-white'
+      )}
+    >
+      <div className="flex justify-end">
         <LinkButton
-          className="InlineLinkButton"
+          classes="inline underline"
           onClick={() => setCollapsed(!isCollapsed)}
           expanded={!isCollapsed}
           title="Toggle visibility of full excerpt text"
           style={linkStyle}
           variant="dark"
         >
-          {toggleLabel}
+          {isCollapsed ? 'More' : 'Less'}
         </LinkButton>
       </div>
     </div>
@@ -44,7 +56,7 @@ const noop = () => {};
 
 /**
  * @typedef ExcerptProps
- * @prop {Object} [children]
+ * @prop {object} [children]
  * @prop {boolean} [inlineControls] - If `true`, the excerpt provides internal
  *   controls to expand and collapse the content. If `false`, the caller sets
  *   the collapsed state via the `collapse` prop.  When using inline controls,
@@ -56,12 +68,12 @@ const noop = () => {};
  *   when it is collapsed.
  * @prop {number} [overflowThreshold] - An additional margin of pixels by which
  *   the content height can exceed `collapsedHeight` before it becomes collapsible.
- * @prop {(isCollapsible?: boolean) => any} [onCollapsibleChanged] - Called when the content height
+ * @prop {(isCollapsible: boolean) => void} [onCollapsibleChanged] - Called when the content height
  *   exceeds or falls below `collapsedHeight + overflowThreshold`.
- * @prop {(collapsed?: boolean) => any} [onToggleCollapsed] - When `inlineControls` is `false`, this
+ * @prop {(collapsed: boolean) => void} [onToggleCollapsed] - When `inlineControls` is `false`, this
  *   function is called when the user requests to expand the content by clicking a
  *   zone at the bottom of the container.
- * @prop {Object} [settings] - Used for theming.
+ * @prop {object} [settings] - Used for theming.
  */
 
 /**
@@ -83,18 +95,16 @@ function Excerpt({
   overflowThreshold = 0,
   settings = {},
 }) {
-  const [collapsedByInlineControls, setCollapsedByInlineControls] = useState(
-    true
-  );
+  const [collapsedByInlineControls, setCollapsedByInlineControls] =
+    useState(true);
 
-  // Container for the excerpt's content.
-  const contentElement = useRef(/** @type {HTMLDivElement|null} */ (null));
+  const contentElement = /** @type {{ current: HTMLDivElement }} */ (useRef());
 
-  // Measured height of `contentElement` in pixels.
+  // Measured height of `contentElement` in pixels
   const [contentHeight, setContentHeight] = useState(0);
 
-  // Update the measured height of the content after the initial render and
-  // when the size of the content element changes.
+  // Update the measured height of the content container after initial render,
+  // and when the size of the content element changes.
   const updateContentHeight = useCallback(() => {
     const newContentHeight = contentElement.current.clientHeight;
     setContentHeight(newContentHeight);
@@ -121,30 +131,61 @@ function Excerpt({
   const isCollapsed = inlineControls ? collapsedByInlineControls : collapse;
   const isExpandable = isOverflowing && isCollapsed;
 
-  /** @type {Object} */
+  /** @type {Record<string, number>} */
   const contentStyle = {};
   if (contentHeight !== 0) {
     contentStyle['max-height'] = isExpandable ? collapsedHeight : contentHeight;
   }
 
+  /** @param {boolean} collapsed */
   const setCollapsed = collapsed =>
     inlineControls
       ? setCollapsedByInlineControls(collapsed)
       : onToggleCollapsed(collapsed);
 
   return (
-    <div className="Excerpt" style={contentStyle}>
-      <div className="Excerpt__content" ref={contentElement}>
+    <div
+      data-testid="excerpt-container"
+      className={classnames(
+        'relative overflow-hidden',
+        'transition-[max-height] ease-in duration-150'
+      )}
+      style={contentStyle}
+    >
+      <div
+        className={classnames(
+          // Establish new block-formatting context to prevent margin-collapsing
+          // in descendent elements from potentially "leaking out" and pushing
+          // this element down from the top of the container.
+          // See https://developer.mozilla.org/en-US/docs/Web/Guide/CSS/Block_formatting_context
+          // See https://github.com/hypothesis/client/issues/1518
+          'inline-block w-full'
+        )}
+        data-testid="excerpt-content"
+        ref={contentElement}
+      >
         {children}
       </div>
       <div
+        data-testid="excerpt-expand"
         role="presentation"
         onClick={() => setCollapsed(false)}
-        className={classnames({
-          Excerpt__shadow: true,
-          'Excerpt__shadow--transparent': inlineControls,
-          'is-hidden': !isExpandable,
-        })}
+        className={classnames(
+          // This element provides a clickable area at the bottom of an
+          // expandable excerpt to expand it.
+          'transition-[opacity] duration-150 ease-linear',
+          'absolute w-full bottom-0 h-touch-minimum',
+          {
+            // For expandable excerpts not using inlineControls, style this
+            // element with a custom shadow-like gradient
+            'bg-gradient-to-b from-excerpt-stop-1 via-excerpt-stop-2 to-excerpt-stop-3':
+              !inlineControls && isExpandable,
+            'bg-none': inlineControls,
+            // Don't make this shadow visible OR clickable if there's nothing
+            // to do here (the excerpt isn't expandable)
+            'opacity-0 pointer-events-none': !isExpandable,
+          }
+        )}
         title="Show the full excerpt"
       />
       {isOverflowing && inlineControls && (
@@ -158,6 +199,4 @@ function Excerpt({
   );
 }
 
-Excerpt.injectedProps = ['settings'];
-
-export default withServices(Excerpt);
+export default withServices(Excerpt, ['settings']);

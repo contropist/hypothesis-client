@@ -5,8 +5,7 @@ import {
 } from 'reselect';
 import shallowEqual from 'shallowequal';
 
-import * as util from '../util';
-import { storeModule } from '../create-store';
+import { createStoreModule, makeAction } from '../create-store';
 
 /**
  * @typedef {import('../../../types/annotator').DocumentMetadata} DocumentMetadata
@@ -18,24 +17,37 @@ import { storeModule } from '../create-store';
  *   - Sub-frames will all have a id (frame identifier) set. The main frame's id is always `null`
  * @prop {DocumentMetadata} metadata - Metadata about the document currently loaded in this frame
  * @prop {string} uri - Current primary URI of the document being displayed
+ * @prop {boolean} [isAnnotationFetchComplete]
  */
 
-function init() {
-  // The list of frames connected to the sidebar app
-  return [];
-}
+/** @type {Frame[]} */
+const initialState = [];
 
-const update = {
-  CONNECT_FRAME: function (state, action) {
+/** @typedef {typeof initialState} State */
+
+const reducers = {
+  /**
+   * @param {State} state
+   * @param {{ frame: Frame }} action
+   */
+  CONNECT_FRAME(state, action) {
     return [...state, action.frame];
   },
 
-  DESTROY_FRAME: function (state, action) {
+  /**
+   * @param {State} state
+   * @param {{ frame: Frame }} action
+   */
+  DESTROY_FRAME(state, action) {
     return state.filter(f => f !== action.frame);
   },
 
-  UPDATE_FRAME_ANNOTATION_FETCH_STATUS: function (state, action) {
-    const frames = state.map(function (frame) {
+  /**
+   * @param {State} state
+   * @param {{ uri: string, isAnnotationFetchComplete: boolean }} action
+   */
+  UPDATE_FRAME_ANNOTATION_FETCH_STATUS(state, action) {
+    const frames = state.map(frame => {
       const match = frame.uri && frame.uri === action.uri;
       if (match) {
         return Object.assign({}, frame, {
@@ -49,15 +61,13 @@ const update = {
   },
 };
 
-const actions = util.actionTypes(update);
-
 /**
  * Add a frame to the list of frames currently connected to the sidebar app.
  *
  * @param {Frame} frame
  */
 function connectFrame(frame) {
-  return { type: actions.CONNECT_FRAME, frame: frame };
+  return makeAction(reducers, 'CONNECT_FRAME', { frame });
 }
 
 /**
@@ -66,7 +76,7 @@ function connectFrame(frame) {
  * @param {Frame} frame
  */
 function destroyFrame(frame) {
-  return { type: actions.DESTROY_FRAME, frame: frame };
+  return makeAction(reducers, 'DESTROY_FRAME', { frame });
 }
 
 /**
@@ -76,15 +86,16 @@ function destroyFrame(frame) {
  * @param {boolean} isFetchComplete
  */
 function updateFrameAnnotationFetchStatus(uri, isFetchComplete) {
-  return {
-    type: actions.UPDATE_FRAME_ANNOTATION_FETCH_STATUS,
+  return makeAction(reducers, 'UPDATE_FRAME_ANNOTATION_FETCH_STATUS', {
+    uri,
     isAnnotationFetchComplete: isFetchComplete,
-    uri: uri,
-  };
+  });
 }
 
 /**
  * Return the list of frames currently connected to the sidebar app.
+ *
+ * @param {State} state
  */
 function frames(state) {
   return state;
@@ -99,10 +110,9 @@ function frames(state) {
  * for that purpose.
  *
  * This may be `null` during startup.
- *
- * @type {(state: any) => Frame|null}
  */
 const mainFrame = createSelector(
+  /** @param {State} state */
   state => state,
 
   // Sub-frames will all have a "frame identifier" set. The main frame is the
@@ -117,13 +127,13 @@ function searchUrisForFrame(frame) {
   let uris = [frame.uri];
 
   if (frame.metadata && frame.metadata.documentFingerprint) {
-    uris = frame.metadata.link.map(function (link) {
+    uris = frame.metadata.link.map(link => {
       return link.href;
     });
   }
 
   if (frame.metadata && frame.metadata.link) {
-    frame.metadata.link.forEach(function (link) {
+    frame.metadata.link.forEach(link => {
       if (link.href.startsWith('doi:')) {
         uris.push(link.href);
       }
@@ -142,25 +152,22 @@ const createShallowEqualSelector = createSelectorCreator(
 /**
  * Memoized selector will return the same array (of URIs) reference unless the
  * values of the array change (are not shallow-equal).
- *
- * @type {(state: any) => string[]}
  */
 const searchUris = createShallowEqualSelector(
-  frames => {
-    return frames.reduce(
+  /** @param {State} frames */
+  frames =>
+    frames.reduce(
       (uris, frame) => uris.concat(searchUrisForFrame(frame)),
-      []
-    );
-  },
+      /** @type {string[]} */ ([])
+    ),
   uris => uris
 );
 
-export default storeModule({
-  init: init,
+export const framesModule = createStoreModule(initialState, {
   namespace: 'frames',
-  update: update,
+  reducers,
 
-  actions: {
+  actionCreators: {
     connectFrame,
     destroyFrame,
     updateFrameAnnotationFetchStatus,

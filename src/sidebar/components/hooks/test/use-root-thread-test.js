@@ -1,7 +1,6 @@
 import { mount } from 'enzyme';
 
-import useRootThread from '../use-root-thread';
-import { $imports } from '../use-root-thread';
+import { useRootThread, $imports } from '../use-root-thread';
 
 describe('sidebar/components/hooks/use-root-thread', () => {
   let fakeStore;
@@ -19,8 +18,10 @@ describe('sidebar/components/hooks/use-root-thread', () => {
     fakeThreadAnnotations = sinon.stub().returns('fakeThreadAnnotations');
 
     $imports.$mock({
-      '../../store/use-store': { useStoreProxy: () => fakeStore },
-      '../../helpers/thread-annotations': fakeThreadAnnotations,
+      '../../store': { useSidebarStore: () => fakeStore },
+      '../../helpers/thread-annotations': {
+        threadAnnotations: fakeThreadAnnotations,
+      },
     });
 
     // Mount a dummy component to be able to use the `useRootThread` hook

@@ -1,18 +1,17 @@
 /* global process */
 
-import createStore from '../create-store';
+import { createStore, createStoreModule } from '../create-store';
 
-const A = 0;
+function initialState(value = 0) {
+  return { count: value };
+}
 
-const modules = [
-  {
-    // namespaced module A
-    init(value = 0) {
-      return { count: value };
-    },
+// Store modules that have the same state but under difference namespaces.
+const counterModules = [
+  createStoreModule(initialState, {
     namespace: 'a',
 
-    update: {
+    reducers: {
       INCREMENT_COUNTER_A: (state, action) => {
         return { count: state.count + action.amount };
       },
@@ -21,7 +20,7 @@ const modules = [
       },
     },
 
-    actions: {
+    actionCreators: {
       incrementA(amount) {
         return { type: 'INCREMENT_COUNTER_A', amount };
       },
@@ -38,15 +37,12 @@ const modules = [
         return state.a.count;
       },
     },
-  },
-  {
-    // namespaced module B
-    init(value = 0) {
-      return { count: value };
-    },
+  }),
+
+  createStoreModule(initialState, {
     namespace: 'b',
 
-    update: {
+    reducers: {
       INCREMENT_COUNTER_B: (state, action) => {
         return { count: state.count + action.amount };
       },
@@ -55,7 +51,7 @@ const modules = [
       },
     },
 
-    actions: {
+    actionCreators: {
       incrementB(amount) {
         return { type: 'INCREMENT_COUNTER_B', amount };
       },
@@ -66,14 +62,77 @@ const modules = [
         return state.count;
       },
     },
-  },
+  }),
 ];
 
+// Store module whose state is an array.
+const tagsModule = createStoreModule([], {
+  namespace: 'tags',
+
+  reducers: {
+    ADD_TAG(state, action) {
+      return [...state, action.tag];
+    },
+  },
+
+  actionCreators: {
+    addTag(tag) {
+      return { type: 'ADD_TAG', tag };
+    },
+  },
+
+  selectors: {
+    getTags(state) {
+      return state;
+    },
+  },
+});
+
+// Store module with reducers that update only a subset of the state.
+const groupsModule = createStoreModule(
+  {
+    currentGroup: null,
+    groups: [],
+  },
+  {
+    namespace: 'groups',
+
+    reducers: {
+      ADD_GROUP(state, action) {
+        return { groups: [...state.groups, action.group] };
+      },
+
+      SELECT_GROUP(state, action) {
+        return { currentGroup: action.id };
+      },
+    },
+
+    actionCreators: {
+      addGroup(group) {
+        return { type: 'ADD_GROUP', group };
+      },
+      selectGroup(id) {
+        return { type: 'SELECT_GROUP', id };
+      },
+    },
+
+    selectors: {
+      allGroups(state) {
+        return state.groups;
+      },
+
+      currentGroup(state) {
+        return state.groups.find(g => g.id === state.currentGroup);
+      },
+    },
+  }
+);
+
 function counterStore(initArgs = [], middleware = []) {
-  return createStore(modules, initArgs, middleware);
+  return createStore(counterModules, initArgs, middleware);
 }
 
-describe('sidebar/store/create-store', () => {
+describe('createStore', () => {
   it('returns a working Redux store', () => {
     const store = counterStore();
     assert.equal(store.getState().a.count, 0);
@@ -95,7 +154,7 @@ describe('sidebar/store/create-store', () => {
     assert.calledWith(subscriber);
   });
 
-  it('passes initial state args to `init` function', () => {
+  it('passes initial state args to `initialState` function', () => {
     const store = counterStore([21]);
     assert.equal(store.getState().a.count, 21);
   });
@@ -108,20 +167,20 @@ describe('sidebar/store/create-store', () => {
 
   it('adds selectors as methods to the store', () => {
     const store = counterStore();
-    store.dispatch(modules[A].actions.incrementA(5));
+    store.dispatch(counterModules[0].actionCreators.incrementA(5));
     assert.equal(store.getCountA(), 5);
   });
 
   it('adds root selectors as methods to the store', () => {
     const store = counterStore();
-    store.dispatch(modules[A].actions.incrementA(5));
+    store.dispatch(counterModules[0].actionCreators.incrementA(5));
     assert.equal(store.getCountAFromRoot(), 5);
   });
 
   it('applies `thunk` middleware by default', () => {
     const store = counterStore();
     const doubleAction = (dispatch, getState) => {
-      dispatch(modules[A].actions.incrementA(getState().a.count));
+      dispatch(counterModules[0].actionCreators.incrementA(getState().a.count));
     };
 
     store.incrementA(5);
@@ -172,6 +231,94 @@ describe('sidebar/store/create-store', () => {
     });
     assert.equal(store.getState().a.count, 0);
     assert.equal(store.getState().b.count, 0);
+  });
+
+  it('supports modules with static initial state', () => {
+    const initialState = { value: 42 };
+    const module = createStoreModule(initialState, {
+      namespace: 'test',
+      actionCreators: {},
+      reducers: {},
+      selectors: {},
+    });
+    const store = createStore([module]);
+    assert.equal(store.getState().test.value, 42);
+  });
+
+  it('supports modules whose state is an array', () => {
+    const store = createStore([tagsModule]);
+    assert.deepEqual(store.getTags(), []);
+    store.addTag('tag-1');
+    store.addTag('tag-2');
+    assert.deepEqual(store.getTags(), ['tag-1', 'tag-2']);
+  });
+
+  it('combines state updates from reducers with initial module state', () => {
+    const store = createStore([groupsModule]);
+
+    const group1 = { id: 'g1', name: 'Test group 1' };
+    const group2 = { id: 'g2', name: 'Test group 2' };
+
+    // Trigger reducers which update different module state. For this to work
+    // the result of each reducer must be combined with existing state.
+    store.addGroup(group1);
+    store.addGroup(group2);
+
+    store.selectGroup('g1');
+    assert.deepEqual(store.currentGroup(), group1);
+
+    store.selectGroup('g2');
+    assert.deepEqual(store.currentGroup(), group2);
+  });
+
+  it('throws if two store modules define the same selector', () => {
+    const moduleA = createStoreModule(
+      {},
+      {
+        namespace: 'a',
+        reducers: {},
+        actionCreators: {},
+        selectors: { testSelector() {} },
+      }
+    );
+    const moduleB = createStoreModule(
+      {},
+      {
+        namespace: 'b',
+        reducers: {},
+        actionCreators: {},
+        selectors: { testSelector() {} },
+      }
+    );
+    assert.throws(
+      () => createStore([moduleA, moduleB]),
+      "Cannot add duplicate 'testSelector' property to object"
+    );
+  });
+
+  it('throws if two store modules define the same action', () => {
+    const moduleA = createStoreModule(
+      {},
+      {
+        namespace: 'a',
+        reducers: {},
+        actionCreators: { testAction() {} },
+        selectors: {},
+      }
+    );
+    const moduleB = createStoreModule(
+      {},
+      {
+        namespace: 'b',
+        reducers: {},
+        actionCreators: { testAction() {} },
+        selectors: {},
+      }
+    );
+    assert.throws(
+      () => createStore([moduleA, moduleB]),
+      "Cannot add duplicate 'testAction' property to object"
+    );
   });
 
   if (process.env.NODE_ENV !== 'production') {

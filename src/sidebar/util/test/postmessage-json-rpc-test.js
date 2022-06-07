@@ -1,6 +1,6 @@
 import EventEmitter from 'tiny-emitter';
 
-import { call } from '../postmessage-json-rpc';
+import { call, notify, $imports } from '../postmessage-json-rpc';
 
 class FakeWindow {
   constructor() {
@@ -14,25 +14,45 @@ describe('sidebar/util/postmessage-json-rpc', () => {
   const origin = 'https://embedder.com';
   const messageId = 42;
 
+  describe('notify', () => {
+    let frame;
+
+    beforeEach(() => {
+      frame = { postMessage: sinon.stub() };
+    });
+
+    it('should send a JSON-RPC 2.0 notification to the frame', () => {
+      notify(frame, origin, 'testMethod', [1, 2, 3]);
+
+      assert.calledOnce(frame.postMessage);
+      assert.calledWith(frame.postMessage, {
+        jsonrpc: '2.0',
+        method: 'testMethod',
+        params: [1, 2, 3],
+      });
+    });
+  });
+
   describe('call', () => {
     let frame;
     let fakeWindow;
 
     function doCall(timeout = 1) {
-      return call(
-        frame,
-        origin,
-        'testMethod',
-        [1, 2, 3],
-        timeout,
-        fakeWindow,
-        messageId
-      );
+      return call(frame, origin, 'testMethod', [1, 2, 3], timeout, fakeWindow);
     }
 
     beforeEach(() => {
       frame = { postMessage: sinon.stub() };
       fakeWindow = new FakeWindow();
+      $imports.$mock({
+        '../../shared/random': {
+          generateHexString: sinon.stub().returns(messageId),
+        },
+      });
+    });
+
+    afterEach(() => {
+      $imports.$restore();
     });
 
     it('sends a message to the target frame', () => {
@@ -148,18 +168,21 @@ describe('sidebar/util/postmessage-json-rpc', () => {
 
     it('if timeout is null, then it does not timeout', async () => {
       const clock = sinon.useFakeTimers();
-      const result = doCall(null);
-      clock.tick(100000); // wait a long time
-      fakeWindow.emitter.emit('message', {
-        origin,
-        data: {
-          jsonrpc: '2.0',
-          id: messageId,
-          result: {},
-        },
-      });
-      await result;
-      clock.restore();
+      try {
+        const result = doCall(null);
+        clock.tick(100000); // wait a long time
+        fakeWindow.emitter.emit('message', {
+          origin,
+          data: {
+            jsonrpc: '2.0',
+            id: messageId,
+            result: {},
+          },
+        });
+        await result;
+      } finally {
+        clock.restore();
+      }
     });
   });
 });

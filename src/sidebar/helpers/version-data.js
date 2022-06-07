@@ -1,31 +1,33 @@
 /**
- * @typedef {import('../components/UserMenu').AuthState} AuthState
+ * @typedef AuthState
+ * @prop {string|null} [userid]
+ * @prop {string} [displayName]
  */
 
 /**
  * An object representing document metadata.
  *
- * @typedef {Object} DocMetadata
+ * @typedef DocMetadata
  * @prop {string=} documentFingerprint - Optional PDF fingerprint for current document
  */
 
 /**
  * An object representing document info.
  *
- * @typedef {Object} DocumentInfo
+ * @typedef DocumentInfo
  * @prop {string=} [uri] - Current document URL
  * @prop {DocMetadata} [metadata] - Document metadata
  */
 
-export default class VersionData {
+export class VersionData {
   /**
    * @param {AuthState} userInfo
-   * @param {DocumentInfo} documentInfo
+   * @param {DocumentInfo[]} documentInfo - Metadata for connected frames.
+   *   If there are multiple frames, the "main" one should be listed first.
    * @param {Window} window_ - test seam
    */
   constructor(userInfo, documentInfo, window_ = window) {
     const noValueString = 'N/A';
-    const docMeta = documentInfo.metadata;
 
     let accountString = noValueString;
     if (userInfo.userid) {
@@ -35,13 +37,14 @@ export default class VersionData {
       }
     }
 
-    this.version = '__VERSION__'; // replaced by versionify
+    this.version = '__VERSION__';
     this.userAgent = window_.navigator.userAgent;
-    this.url = documentInfo.uri || noValueString;
+    this.urls = documentInfo.map(di => di.uri).join(', ') || noValueString;
+
+    // We currently assume that only the main (first) frame may have a fingerprint.
     this.fingerprint =
-      docMeta && docMeta.documentFingerprint
-        ? docMeta.documentFingerprint
-        : noValueString;
+      documentInfo[0]?.metadata?.documentFingerprint ?? noValueString;
+
     this.account = accountString;
     this.timestamp = new Date().toString();
   }
@@ -55,7 +58,7 @@ export default class VersionData {
   asFormattedString() {
     return `Version: ${this.version}
 User Agent: ${this.userAgent}
-URL: ${this.url}
+URL: ${this.urls}
 Fingerprint: ${this.fingerprint}
 Account: ${this.account}
 Date: ${this.timestamp}

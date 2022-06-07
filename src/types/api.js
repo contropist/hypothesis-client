@@ -6,7 +6,7 @@
  */
 
 /**
- * An entry in the API index response (`/api`) describing an API route.
+ * Metadata specifying how to call an API route.
  *
  * @typedef RouteMetadata
  * @prop {string} method - HTTP method
@@ -15,13 +15,31 @@
  */
 
 /**
- * Structure of the `links` field of the API index response (`/api`) describing
- * available API routes.
+ * A nested map of API route name to route metadata.
  *
  * @typedef {{ [key: string]: RouteMap|RouteMetadata }} RouteMap
  */
 
 /**
+ * Structure of the API index response (`/api`).
+ *
+ * @typedef IndexResponse
+ * @prop {RouteMap} links
+ */
+
+/**
+ * Structure of the Hypothesis links response (`/api/links`).
+ *
+ * This is a map of link name (eg. "account.settings") to URL. The URL may
+ * include ":"-prefixed placeholders/variables.
+ *
+ * @typedef {Record<string, string>} LinksResponse
+ */
+
+/**
+ * Selector which identifies a document region using the selected text plus
+ * the surrounding context.
+ *
  * @typedef TextQuoteSelector
  * @prop {'TextQuoteSelector'} type
  * @prop {string} exact
@@ -30,6 +48,9 @@
  */
 
 /**
+ * Selector which identifies a document region using UTF-16 character offsets
+ * in the document body's `textContent`.
+ *
  * @typedef TextPositionSelector
  * @prop {'TextPositionSelector'} type
  * @prop {number} start
@@ -37,6 +58,8 @@
  */
 
 /**
+ * Selector which identifies a document region using XPaths and character offsets.
+ *
  * @typedef RangeSelector
  * @prop {'RangeSelector'} type
  * @prop {string} startContainer
@@ -46,6 +69,9 @@
  */
 
 /**
+ * Serialized representation of a region of a document which an annotation
+ * pertains to.
+ *
  * @typedef {TextQuoteSelector | TextPositionSelector | RangeSelector} Selector
  */
 
@@ -79,10 +105,10 @@
  * @prop {string} user
  * @prop {boolean} hidden
  *
- * @prop {Object} document
+ * @prop {object} document
  *   @prop {string} document.title
  *
- * @prop {Object} permissions
+ * @prop {object} permissions
  *   @prop {string[]} permissions.read
  *   @prop {string[]} permissions.update
  *   @prop {string[]} permissions.delete
@@ -91,16 +117,16 @@
  *   The Hypothesis API structure allows for multiple targets, but the current
  *   h server only allows for one target per annotation.
  *
- * @prop {Object} [moderation]
+ * @prop {object} [moderation]
  *   @prop {number} moderation.flagCount
  *
- * @prop {Object} links
+ * @prop {object} links
  *   @prop {string} [links.incontext] - A "bouncer" URL to the annotation in
  *     context on its target document
  *   @prop {string} [links.html] - An `h`-website URL to view the annotation
  *     by itself
  *
- * @prop {Object} [user_info]
+ * @prop {object} [user_info]
  *   @prop {string|null} user_info.display_name
  *
  * // Properties not present on API objects, but added by utilities in the client.
@@ -110,12 +136,18 @@
  */
 
 /**
+ * An annotation which has been saved to the backend and assigned an ID.
+ *
+ * @typedef {Annotation & { id: string }} SavedAnnotation
+ */
+
+/**
  * @typedef Profile
  * @prop {string|null} userid
- * @prop {Object} preferences
+ * @prop {object} preferences
  *   @prop {boolean} [preferences.show_sidebar_tutorial]
- * @prop {Object.<string, boolean>} features
- * @prop {Object} [user_info]
+ * @prop {Record<string, boolean>} features
+ * @prop {object} [user_info]
  *   @prop {string|null} user_info.display_name
  *
  * @prop {unknown} [groups] - Deprecated.
@@ -141,12 +173,14 @@
  * TODO - Fill out remaining properties
  *
  * @typedef Group
- * @prop {string} id
+ * @prop {string} id - a.k.a. "pubid", unique per authority.
+ * @prop {string} [groupid] - Fully-qualified ID with authority.
+ *   Not all groups have a `groupid`.
  * @prop {'private'|'open'} type
  * @prop {Organization} organization - nb. This field is nullable in the API, but
  *   we assign a default organization on the client.
  * @prop {GroupScopes|null} scopes
- * @prop {Object} links
+ * @prop {object} links
  *   @prop {string} [links.html]
  *
  * // Properties not present on API objects, but added by utilities in the client.
@@ -155,6 +189,21 @@
  * @prop {boolean} isScopedToUri
  * @prop {string} name
  * @prop {boolean} canLeave
+ *
+ */
+
+/**
+ * @typedef {NonNullable<Group["id"]|Group["groupid"]>} GroupIdentifier
+ *
+ * All Groups have an `id`, which is a server-assigned identifier. This is the
+ * primary field used to identify a Group.
+ *
+ * In some cases, specifically LMS, it is necessary for an outside service to
+ * be able to specify its own identifier. This gets stored in the `groupid`
+ * field of a Group. Only some Groups have a `groupid`.
+ *
+ * Application logic operates on `id`s, but we may receive `groupid`s in some
+ * cases from outside sevices, e.g. the `changeFocusModeUser` RPC method.
  */
 
 /**
@@ -182,7 +231,7 @@
  *
  * See https://h.readthedocs.io/en/latest/api-reference/#tag/annotations/paths/~1search/get
  *
- * @typedef SearchResult
+ * @typedef SearchResponse
  * @prop {number} total
  * @prop {Annotation[]} rows
  * @prop {Annotation[]} [replies] - Unofficial property that is populated if

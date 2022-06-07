@@ -2,39 +2,52 @@
  * Utility functions for querying annotation metadata.
  */
 
-/** @typedef {import('../../types/api').Annotation} Annotation */
-/** @typedef {import('../../types/api').TextPositionSelector} TextPositionSelector */
-/** @typedef {import('../../types/api').TextQuoteSelector} TextQuoteSelector */
+/**
+ * @typedef {import('../../types/api').Annotation} Annotation
+ * @typedef {import('../../types/api').SavedAnnotation} SavedAnnotation
+ * @typedef {import('../../types/api').TextPositionSelector} TextPositionSelector
+ * @typedef {import('../../types/api').TextQuoteSelector} TextQuoteSelector
+ */
 
-/** Extract a URI, domain and title from the given domain model object.
+/**
+ * Extract document metadata from an annotation.
  *
  * @param {Annotation} annotation
- *
  */
 export function documentMetadata(annotation) {
   const uri = annotation.uri;
 
-  let domain = new URL(uri).hostname;
-  let title = domain;
-
-  if (annotation.document && annotation.document.title) {
-    title = annotation.document.title[0];
+  let domain;
+  try {
+    domain = new URL(uri).hostname;
+  } catch {
+    // Annotation URI parsing on the backend is very liberal compared to the URL
+    // constructor. There is also some historic invalid data in h (eg [1]).
+    // Hence we must handle URL parsing failures in the client.
+    //
+    // [1] https://github.com/hypothesis/client/issues/3666
+    domain = '';
   }
-
   if (domain === 'localhost') {
     domain = '';
   }
 
+  let title = domain;
+  if (annotation.document && annotation.document.title) {
+    title = annotation.document.title[0];
+  }
+
   return {
-    uri: uri,
-    domain: domain,
-    title: title,
+    uri,
+    domain,
+    title,
   };
 }
 
 /**
  * Return the domain and title of an annotation for display on an annotation
  * card.
+ *
  * @param {Annotation} annotation
  */
 export function domainAndTitle(annotation) {
@@ -107,17 +120,27 @@ function titleTextFromAnnotation(annotation) {
 /**
  * Return `true` if the given annotation is a reply, `false` otherwise.
  *
- *  @param {Annotation} annotation - An annotation domain model object.
+ * @param {Annotation} annotation
  */
 export function isReply(annotation) {
   return (annotation.references || []).length > 0;
 }
 
-/** Return `true` if the given annotation is new, `false` otherwise.
+/**
+ * Return true if the given annotation has been saved to the backend and assigned
+ * an ID.
  *
- * "New" means this annotation has been newly created client-side and not
- * saved to the server yet.
+ * @param {Annotation} annotation
+ * @return {annotation is SavedAnnotation}
+ */
+export function isSaved(annotation) {
+  return !!annotation.id;
+}
+
+/**
+ * Return true if an annotation has not been saved to the backend.
  *
+ * @deprecated - Use {@link isSaved} instead
  * @param {Annotation} annotation
  */
 export function isNew(annotation) {
@@ -136,7 +159,7 @@ export function isPublic(annotation) {
     return isPublic;
   }
 
-  annotation.permissions.read.forEach(function (perm) {
+  annotation.permissions.read.forEach(perm => {
     const readPermArr = perm.split(':');
     if (readPermArr.length === 2 && readPermArr[0] === 'group') {
       isPublic = true;
@@ -251,6 +274,22 @@ export function isPageNote(annotation) {
  */
 export function isAnnotation(annotation) {
   return !!(hasSelector(annotation) && !isOrphan(annotation));
+}
+
+/**
+ * Return a human-readable string describing the annotation's role.
+ *
+ * @param {Annotation} annotation
+ */
+export function annotationRole(annotation) {
+  if (isReply(annotation)) {
+    return 'Reply';
+  } else if (isHighlight(annotation)) {
+    return 'Highlight';
+  } else if (isPageNote(annotation)) {
+    return 'Page note';
+  }
+  return 'Annotation';
 }
 
 /** Return a numeric key that can be used to sort annotations by location.

@@ -4,6 +4,8 @@
  * We don't use the URL constructor here because IE and early versions of Edge
  * do not support it and this code runs early in the life of the app before any
  * polyfills can be loaded.
+ *
+ * @param {string} url
  */
 function extractOrigin(url) {
   const match = url.match(/(https?):\/\/([^:/]+)/);
@@ -14,7 +16,9 @@ function extractOrigin(url) {
 }
 
 function currentScriptOrigin(document_ = document) {
-  const scriptEl = /** @type {HTMLScriptElement|null} */ (document_.currentScript);
+  const scriptEl = /** @type {HTMLScriptElement|null} */ (
+    document_.currentScript
+  );
   if (!scriptEl) {
     // Function was called outside of initial script execution.
     return null;
@@ -34,7 +38,7 @@ function currentScriptOrigin(document_ = document) {
  * @param {string} url
  * @param {Document} document_
  */
-export default function processUrlTemplate(url, document_ = document) {
+export function processUrlTemplate(url, document_ = document) {
   if (url.indexOf('{') === -1) {
     // Not a template. This should always be the case in production.
     return url;

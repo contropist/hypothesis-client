@@ -1,15 +1,15 @@
-import createStore from '../../create-store';
-import defaults from '../defaults';
+import { createStore } from '../../create-store';
+import { defaultsModule } from '../defaults';
 
-describe('store/modules/defaults', function () {
+describe('store/modules/defaults', () => {
   let store;
 
   beforeEach(() => {
-    store = createStore([defaults]);
+    store = createStore([defaultsModule]);
   });
 
   describe('actions', () => {
-    describe('#setDefault', function () {
+    describe('#setDefault', () => {
       it('should update the indicated default with the new value', () => {
         const beforePrivacy = store.getDefault('annotationPrivacy');
         store.setDefault('annotationPrivacy', 'private');

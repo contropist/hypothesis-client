@@ -6,12 +6,12 @@ import * as redux from 'redux';
  * Unlike a real store, this has a `setState()` method that can be used to
  * set the state directly.
  *
- * @param {Object} initialState - Initial state for the store
- * @param {Object} methods - A set of additional properties to mixin to the
+ * @param {object} initialState - Initial state for the store
+ * @param {object} methods - A set of additional properties to mixin to the
  *        returned store.
- * @return {Object} Redux store
+ * @return {object} Redux store
  */
-export default function fakeStore(initialState, methods) {
+export function fakeReduxStore(initialState, methods) {
   function update(state, action) {
     if (action.state) {
       return Object.assign({}, state, action.state);
@@ -23,7 +23,7 @@ export default function fakeStore(initialState, methods) {
   const store = redux.createStore(update, initialState);
 
   store.setState = function (state) {
-    store.dispatch({ type: 'SET_STATE', state: state });
+    store.dispatch({ type: 'SET_STATE', state });
   };
 
   return Object.assign(store, methods);

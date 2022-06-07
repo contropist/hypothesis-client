@@ -1,32 +1,24 @@
-import BucketBar from '../bucket-bar';
-import { $imports } from '../bucket-bar';
+import { BucketBar, $imports } from '../bucket-bar';
 
 describe('BucketBar', () => {
-  const sandbox = sinon.createSandbox();
-  let fakeAnnotator;
-  let fakeBucketUtil;
   let bucketBars;
   let bucketProps;
   let container;
-
-  const createBucketBar = function (options) {
-    const bucketBar = new BucketBar(container, fakeAnnotator, options);
-    bucketBars.push(bucketBar);
-    return bucketBar;
-  };
+  let fakeComputeBuckets;
+  let fakeOnFocusAnnotations;
+  let fakeOnScrollToClosestOffScreenAnchor;
+  let fakeOnSelectAnnotations;
 
   beforeEach(() => {
-    container = document.createElement('div');
     bucketBars = [];
     bucketProps = {};
-    fakeAnnotator = {
-      anchors: [],
-      selectAnnotations: sinon.stub(),
-    };
+    container = document.createElement('div');
 
-    fakeBucketUtil = {
-      anchorBuckets: sinon.stub().returns({}),
-    };
+    fakeComputeBuckets = sinon.stub().returns({});
+
+    fakeOnFocusAnnotations = sinon.stub();
+    fakeOnScrollToClosestOffScreenAnchor = sinon.stub();
+    fakeOnSelectAnnotations = sinon.stub();
 
     const FakeBuckets = props => {
       bucketProps = props;
@@ -35,111 +27,79 @@ describe('BucketBar', () => {
 
     $imports.$mock({
       './components/Buckets': FakeBuckets,
-      './util/buckets': fakeBucketUtil,
+      './util/buckets': { computeBuckets: fakeComputeBuckets },
     });
-
-    sandbox.stub(window, 'requestAnimationFrame').yields();
   });
 
   afterEach(() => {
     bucketBars.forEach(bucketBar => bucketBar.destroy());
     $imports.$restore();
-    sandbox.restore();
     container.remove();
   });
 
-  it('should render buckets for existing anchors when constructed', () => {
+  const createBucketBar = () => {
+    const bucketBar = new BucketBar(container, {
+      onFocusAnnotations: fakeOnFocusAnnotations,
+      onScrollToClosestOffScreenAnchor: fakeOnScrollToClosestOffScreenAnchor,
+      onSelectAnnotations: fakeOnSelectAnnotations,
+    });
+    bucketBars.push(bucketBar);
+    return bucketBar;
+  };
+
+  it('should render the bucket bar with no buckets when constructed', () => {
     const bucketBar = createBucketBar();
-    assert.calledWith(fakeBucketUtil.anchorBuckets, fakeAnnotator.anchors);
-    assert.ok(bucketBar.element.querySelector('.FakeBuckets'));
+    assert.calledWith(fakeComputeBuckets, []);
+    assert.ok(bucketBar._bucketsContainer.querySelector('.FakeBuckets'));
   });
 
-  describe('updating buckets', () => {
-    it('should update buckets when the window is resized', () => {
-      createBucketBar();
-      fakeBucketUtil.anchorBuckets.resetHistory();
+  it('passes "onFocusAnnotations" to the Bucket component', () => {
+    createBucketBar();
+    const tags = ['t1', 't2'];
 
-      window.dispatchEvent(new Event('resize'));
+    bucketProps.onFocusAnnotations(tags);
 
-      assert.calledOnce(fakeBucketUtil.anchorBuckets);
-    });
+    assert.calledWith(fakeOnFocusAnnotations, tags);
+  });
 
-    it('should update buckets when the window is scrolled', () => {
-      createBucketBar();
-      fakeBucketUtil.anchorBuckets.resetHistory();
+  it('passes "onScrollToClosestOffScreenAnchor" to the Bucket component', () => {
+    createBucketBar();
+    const tags = ['t1', 't2'];
+    const direction = 'down';
 
-      window.dispatchEvent(new Event('scroll'));
+    bucketProps.onScrollToClosestOffScreenAnchor(tags, direction);
 
-      assert.calledOnce(fakeBucketUtil.anchorBuckets);
-    });
+    assert.calledWith(fakeOnScrollToClosestOffScreenAnchor, tags, direction);
+  });
 
-    it('should select annotations when Buckets component invokes callback', () => {
+  it('passes "onSelectAnnotations" to the Bucket component', () => {
+    createBucketBar();
+    const tags = ['t1', 't2'];
+
+    bucketProps.onSelectAnnotations(tags, true);
+
+    assert.calledWith(fakeOnSelectAnnotations, tags, true);
+  });
+
+  describe('#update', () => {
+    it('updates the buckets', () => {
       const bucketBar = createBucketBar();
-      bucketBar._update();
+      fakeComputeBuckets.resetHistory();
 
-      const fakeAnnotations = ['hi', 'there'];
-      bucketProps.onSelectAnnotations(fakeAnnotations, true);
-      assert.calledWith(fakeAnnotator.selectAnnotations, fakeAnnotations, true);
+      bucketBar.update([1, 2]);
+
+      assert.calledOnce(fakeComputeBuckets);
+      assert.calledWith(fakeComputeBuckets, [1, 2]);
     });
+  });
 
-    context('when `contentContainer` is specified', () => {
-      let contentContainer;
-
-      beforeEach(() => {
-        contentContainer = document.createElement('div');
-        document.body.appendChild(contentContainer);
-      });
-
-      afterEach(() => {
-        contentContainer.remove();
-      });
-
-      it('should update buckets when any scrollable scrolls', () => {
-        createBucketBar({ contentContainer });
-        fakeBucketUtil.anchorBuckets.resetHistory();
-
-        contentContainer.dispatchEvent(new Event('scroll'));
-
-        assert.calledOnce(fakeBucketUtil.anchorBuckets);
-      });
-    });
-
-    context('when no `contentContainer` is specified', () => {
-      it('should update buckets when body is scrolled', () => {
-        createBucketBar({ contentContainer: undefined });
-        fakeBucketUtil.anchorBuckets.resetHistory();
-
-        document.body.dispatchEvent(new Event('scroll'));
-
-        assert.calledOnce(fakeBucketUtil.anchorBuckets);
-      });
-    });
-
-    it('should not update if another update is pending', () => {
+  describe('#destroy', () => {
+    it('removes the BucketBar container element', () => {
       const bucketBar = createBucketBar();
-      bucketBar._updatePending = true;
-      bucketBar.update();
-      assert.notCalled(window.requestAnimationFrame);
-    });
 
-    it('deletes the bucketbar element after destroy method is called', () => {
-      const bucketBar = createBucketBar();
       bucketBar.destroy();
+
       assert.isFalse(container.hasChildNodes());
     });
-  });
-
-  it('should stop listening for scroll events when destroyed', () => {
-    const container = document.createElement('div');
-    const bucketBar = createBucketBar({ contentContainer: container });
-    fakeBucketUtil.anchorBuckets.resetHistory();
-
-    bucketBar.destroy();
-
-    container.dispatchEvent(new Event('scroll'));
-    window.dispatchEvent(new Event('resize'));
-    window.dispatchEvent(new Event('scroll'));
-
-    assert.notCalled(fakeBucketUtil.anchorBuckets);
   });
 });

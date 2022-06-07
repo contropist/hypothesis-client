@@ -1,16 +1,17 @@
-import createStore from '../../create-store';
-import toastMessages from '../toast-messages';
+import { createStore } from '../../create-store';
+import { toastMessagesModule } from '../toast-messages';
 
-describe('store/modules/toast-messages', function () {
+describe('store/modules/toast-messages', () => {
   let store;
   let fakeToastMessage;
 
   beforeEach(() => {
-    store = createStore([toastMessages]);
+    store = createStore([toastMessagesModule]);
     fakeToastMessage = {
       id: 'myToast',
       type: 'anyType',
       message: 'This is a message',
+      visuallyHidden: false,
     };
   });
 
@@ -27,6 +28,7 @@ describe('store/modules/toast-messages', function () {
         assert.equal(messages[0].id, 'myToast');
         assert.equal(messages[0].type, 'anyType');
         assert.equal(messages[0].message, 'This is a message');
+        assert.isFalse(messages[0].visuallyHidden);
       });
 
       it('adds duplicate messages to the array of messages in state', () => {

@@ -1,6 +1,6 @@
 import { render } from 'preact';
 
-import ConfirmDialog from './components/ConfirmDialog';
+import { ConfirmModal } from '@hypothesis/frontend-shared';
 
 /**
  * Show the user a prompt asking them to confirm an action.
@@ -11,10 +11,10 @@ import ConfirmDialog from './components/ConfirmDialog';
  *    for the native `window.confirm` dialog)
  *  - The visual style of the dialog matches the Hypothesis design system
  *
- * @param {object} options - Options for the `ConfirmDialog`
- *   @prop {string} [title]
- *   @prop {string} message
- *   @prop {string} [confirmAction]
+ * @param {object} options - Options for the `ConfirmModal`
+ *   @param {string} [options.title]
+ *   @param {string} options.message
+ *   @param {string} [options.confirmAction]
  * @return {Promise<boolean>} - Promise that resolves with `true` if the user
  *   confirmed the action or `false` if they canceled it.
  */
@@ -23,16 +23,6 @@ export async function confirm({
   message,
   confirmAction = 'Yes',
 }) {
-  const start = Date.now();
-
-  // Use the legacy `window.confirm` API where available until we've polished
-  // the new one. In Chrome >= 91 `window.confirm` will immediately return false
-  // so we have no option but to use the new implementation.
-  const result = window.confirm(message);
-  if (result || Date.now() - start >= 10) {
-    return result;
-  }
-
   const container = document.createElement('div');
   container.setAttribute('data-testid', 'confirm-container');
 
@@ -52,7 +42,7 @@ export async function confirm({
     };
 
     render(
-      <ConfirmDialog
+      <ConfirmModal
         title={title}
         message={message}
         confirmAction={confirmAction}

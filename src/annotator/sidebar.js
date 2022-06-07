@@ -1,38 +1,69 @@
-import Hammer from 'hammerjs';
+import * as Hammer from 'hammerjs';
 
-import annotationCounts from './annotation-counts';
-import sidebarTrigger from './sidebar-trigger';
-import { createSidebarConfig } from './config/sidebar';
-import events from '../shared/bridge-events';
-import features from './features';
+import { addConfigFragment } from '../shared/config-fragment';
+import { sendErrorsTo } from '../shared/frame-error-capture';
+import { ListenerCollection } from '../shared/listener-collection';
+import { PortRPC } from '../shared/messaging';
 
+import { annotationCounts } from './annotation-counts';
+import { BucketBar } from './bucket-bar';
+import { createAppConfig } from './config/app';
+import { FeatureFlags } from './features';
+import { sidebarTrigger } from './sidebar-trigger';
 import { ToolbarController } from './toolbar';
 import { createShadowRoot } from './util/shadow-root';
-import BucketBar from './bucket-bar';
-import { ListenerCollection } from './util/listener-collection';
 
 /**
- * @typedef {import('./guest').default} Guest
- *
- * @typedef LayoutState
- * @prop {boolean} expanded
- * @prop {number} width
- * @prop {number} height
+ * @typedef {import('./guest').Guest} Guest
+ * @typedef {import('../types/annotator').AnchorPosition} AnchorPosition
+ * @typedef {import('../types/annotator').SidebarLayout} SidebarLayout
+ * @typedef {import('../types/annotator').Destroyable} Destroyable
+ * @typedef {import('../types/config').Service} Service
+ * @typedef {import('../types/port-rpc-events').GuestToHostEvent} GuestToHostEvent
+ * @typedef {import('../types/port-rpc-events').HostToGuestEvent} HostToGuestEvent
+ * @typedef {import('../types/port-rpc-events').HostToSidebarEvent} HostToSidebarEvent
+ * @typedef {import('../types/port-rpc-events').SidebarToHostEvent} SidebarToHostEvent
  */
 
 // Minimum width to which the iframeContainer can be resized.
 export const MIN_RESIZE = 280;
 
 /**
+ * Client configuration used to launch the sidebar application.
+ *
+ * This includes the URL for the iframe and configuration to pass to the
+ * application on launch.
+ *
+ * @typedef {{ sidebarAppUrl: string } & Record<string, unknown>} SidebarConfig
+ */
+
+/**
+ * Client configuration used by the sidebar container ({@link Sidebar}).
+ *
+ * @typedef SidebarContainerConfig
+ * @prop {Service[]} [services] - Details of the annotation service the
+ *   client should connect to. This includes callbacks provided by the host
+ *   page to handle certain actions in the sidebar (eg. the Login button).
+ * @prop {string} [externalContainerSelector] - CSS selector of a container
+ *   element in the host page which the sidebar should be added into, instead
+ *   of creating a new container.
+ * @prop {(layout: SidebarLayout) => void} [onLayoutChange] - Callback that
+ *   allows the host page to react to the sidebar being opened, closed or
+ *   resized
+ */
+
+/**
  * Create the iframe that will load the sidebar application.
  *
+ * @param {SidebarConfig} config
  * @return {HTMLIFrameElement}
  */
 function createSidebarIframe(config) {
-  const sidebarConfig = createSidebarConfig(config);
-  const configParam =
-    'config=' + encodeURIComponent(JSON.stringify(sidebarConfig));
-  const sidebarAppSrc = config.sidebarAppUrl + '#' + configParam;
+  const sidebarURL = /** @type {string} */ (config.sidebarAppUrl);
+  const sidebarAppSrc = addConfigFragment(
+    sidebarURL,
+    createAppConfig(sidebarURL, config)
+  );
 
   const sidebarFrame = document.createElement('iframe');
 
@@ -41,7 +72,7 @@ function createSidebarIframe(config) {
 
   sidebarFrame.src = sidebarAppSrc;
   sidebarFrame.title = 'Hypothesis annotation viewer';
-  sidebarFrame.className = 'h-sidebar-iframe';
+  sidebarFrame.className = 'sidebar-frame';
 
   return sidebarFrame;
 }
@@ -49,25 +80,52 @@ function createSidebarIframe(config) {
 /**
  * The `Sidebar` class creates (1) the sidebar application iframe, (2) its container,
  * as well as (3) the adjacent controls.
+ *
+ * @implements {Destroyable}
  */
-export default class Sidebar {
+export class Sidebar {
   /**
    * @param {HTMLElement} element
    * @param {import('./util/emitter').EventBus} eventBus -
    *   Enables communication between components sharing the same eventBus
-   * @param {Guest} guest -
-   *   The `Guest` instance for the current frame. It is currently assumed that
-   *   it is always possible to annotate in the frame where the sidebar is
-   *   displayed.
-   * @param {Record<string, any>} [config]
+   * @param {SidebarContainerConfig & SidebarConfig} config
    */
-  constructor(element, eventBus, guest, config = {}) {
+  constructor(element, eventBus, config) {
     this._emitter = eventBus.createEmitter();
+
+    /**
+     * Tracks which `Guest` has a text selection. `null` indicates to default
+     * to the first connected guest frame.
+     *
+     * @type {PortRPC<GuestToHostEvent, HostToGuestEvent>|null}
+     */
+    this._guestWithSelection = null;
+
+    /**
+     * Channels for host-guest communication.
+     *
+     * @type {PortRPC<GuestToHostEvent, HostToGuestEvent>[]}
+     */
+    this._guestRPC = [];
+
+    /**
+     * Channel for host-sidebar communication.
+     *
+     * @type {PortRPC<SidebarToHostEvent, HostToSidebarEvent>}
+     */
+    this._sidebarRPC = new PortRPC();
+
+    /**
+     * The `<iframe>` element containing the sidebar application.
+     */
     this.iframe = createSidebarIframe(config);
-    this.options = config;
+
+    this._config = config;
 
     /** @type {BucketBar|null} */
     this.bucketBar = null;
+
+    this.features = new FeatureFlags();
 
     if (config.externalContainerSelector) {
       this.externalFrame =
@@ -77,63 +135,55 @@ export default class Sidebar {
     } else {
       this.iframeContainer = document.createElement('div');
       this.iframeContainer.style.display = 'none';
-      this.iframeContainer.className = 'annotator-frame';
+      this.iframeContainer.className = 'sidebar-container';
 
       if (config.theme === 'clean') {
-        this.iframeContainer.classList.add('annotator-frame--theme-clean');
+        this.iframeContainer.classList.add('theme-clean');
       } else {
-        const bucketBar = new BucketBar(this.iframeContainer, guest, {
-          contentContainer: guest.contentContainer(),
+        this.bucketBar = new BucketBar(this.iframeContainer, {
+          onFocusAnnotations: tags =>
+            this._guestRPC.forEach(rpc => rpc.call('focusAnnotations', tags)),
+          onScrollToClosestOffScreenAnchor: (tags, direction) =>
+            this._guestRPC.forEach(rpc =>
+              rpc.call('scrollToClosestOffScreenAnchor', tags, direction)
+            ),
+          onSelectAnnotations: (tags, toggle) =>
+            this._guestRPC.forEach(rpc =>
+              rpc.call('selectAnnotations', tags, toggle)
+            ),
         });
-        this._emitter.subscribe('anchorsChanged', () => bucketBar.update());
-        this.bucketBar = bucketBar;
       }
 
       this.iframeContainer.appendChild(this.iframe);
 
       // Wrap up the 'iframeContainer' element into a shadow DOM so it is not affected by host CSS styles
       this.hypothesisSidebar = document.createElement('hypothesis-sidebar');
-      const shadowDom = createShadowRoot(this.hypothesisSidebar);
-      shadowDom.appendChild(this.iframeContainer);
+      const shadowRoot = createShadowRoot(this.hypothesisSidebar);
+      shadowRoot.appendChild(this.iframeContainer);
 
       element.appendChild(this.hypothesisSidebar);
     }
 
-    this.guest = guest;
+    // Register the sidebar as a handler for Hypothesis errors in this frame.
+    if (this.iframe.contentWindow) {
+      sendErrorsTo(this.iframe.contentWindow);
+    }
 
     this._listeners = new ListenerCollection();
-
-    this._emitter.subscribe('panelReady', () => {
-      // Show the UI
-      if (this.iframeContainer) {
-        this.iframeContainer.style.display = '';
-      }
-    });
-
-    this._emitter.subscribe('beforeAnnotationCreated', annotation => {
-      // When a new non-highlight annotation is created, focus
-      // the sidebar so that the text editor can be focused as
-      // soon as the annotation card appears
-      if (!annotation.$highlight) {
-        /** @type {Window} */ (this.iframe.contentWindow).focus();
-      }
-    });
-
-    if (
-      config.openSidebar ||
-      config.annotations ||
-      config.query ||
-      config.group
-    ) {
-      this._emitter.subscribe('panelReady', () => this.open());
-    }
 
     // Set up the toolbar on the left edge of the sidebar.
     const toolbarContainer = document.createElement('div');
     this.toolbar = new ToolbarController(toolbarContainer, {
-      createAnnotation: () => guest.createAnnotation(),
+      createAnnotation: () => {
+        if (this._guestRPC.length === 0) {
+          return;
+        }
+
+        const rpc = this._guestWithSelection ?? this._guestRPC[0];
+        rpc.call('createAnnotation');
+      },
       setSidebarOpen: open => (open ? this.open() : this.close()),
-      setHighlightsVisible: show => this.setAllVisibleHighlights(show),
+      setHighlightsVisible: show => this.setHighlightsVisible(show),
     });
 
     if (config.theme === 'clean') {
@@ -141,13 +191,6 @@ export default class Sidebar {
     } else {
       this.toolbar.useMinimalControls = false;
     }
-
-    this._emitter.subscribe('highlightsVisibleChanged', visible => {
-      this.toolbar.highlightsVisible = visible;
-    });
-    this._emitter.subscribe('hasSelectionChanged', hasSelection => {
-      this.toolbar.newAnnotationType = hasSelection ? 'annotation' : 'note';
-    });
 
     if (this.iframeContainer) {
       // If using our own container frame for the sidebar, add the toolbar to it.
@@ -183,12 +226,21 @@ export default class Sidebar {
 
     this.onLayoutChange = config.onLayoutChange;
 
+    /** @type {SidebarLayout} */
+    this._layoutState = {
+      expanded: false,
+      width: 0,
+      toolbarWidth: 0,
+    };
+
     // Initial layout notification
-    this._notifyOfLayoutChange(false);
+    this._updateLayoutState(false);
     this._setupSidebarEvents();
   }
 
   destroy() {
+    this._guestRPC.forEach(rpc => rpc.destroy());
+    this._sidebarRPC.destroy();
     this.bucketBar?.destroy();
     this._listeners.removeAll();
     this._hammerManager?.destroy();
@@ -198,38 +250,144 @@ export default class Sidebar {
       this.iframe.remove();
     }
     this._emitter.destroy();
+
+    // Unregister the sidebar iframe as a handler for errors in this frame.
+    sendErrorsTo(null);
+  }
+
+  /**
+   * Setup communication with a frame that has connected to the host.
+   *
+   * @param {'guest'|'sidebar'} source
+   * @param {MessagePort} port
+   */
+  onFrameConnected(source, port) {
+    switch (source) {
+      case 'guest':
+        this._connectGuest(port);
+        break;
+      case 'sidebar':
+        this._sidebarRPC.connect(port);
+        break;
+    }
+  }
+
+  /**
+   * @param {MessagePort} port
+   */
+  _connectGuest(port) {
+    /** @type {PortRPC<GuestToHostEvent, HostToGuestEvent>} */
+    const guestRPC = new PortRPC();
+
+    guestRPC.on('textSelected', () => {
+      this._guestWithSelection = guestRPC;
+      this.toolbar.newAnnotationType = 'annotation';
+      this._guestRPC
+        .filter(port => port !== guestRPC)
+        .forEach(rpc => rpc.call('clearSelection'));
+    });
+
+    guestRPC.on('textUnselected', () => {
+      this._guestWithSelection = null;
+      this.toolbar.newAnnotationType = 'note';
+      this._guestRPC
+        .filter(port => port !== guestRPC)
+        .forEach(rpc => rpc.call('clearSelection'));
+    });
+
+    // The listener will do nothing if the sidebar doesn't have a bucket bar
+    // (clean theme)
+    const bucketBar = this.bucketBar;
+    // Currently, we ignore `anchorsChanged` for all the guests except the first connected guest.
+    if (bucketBar) {
+      guestRPC.on(
+        'anchorsChanged',
+        /** @param {AnchorPosition[]} positions  */
+        positions => {
+          if (this._guestRPC.indexOf(guestRPC) === 0) {
+            bucketBar.update(positions);
+          }
+        }
+      );
+    }
+
+    guestRPC.on('close', () => {
+      guestRPC.destroy();
+      if (guestRPC === this._guestWithSelection) {
+        this._guestWithSelection = null;
+      }
+      this._guestRPC = this._guestRPC.filter(rpc => rpc !== guestRPC);
+    });
+
+    guestRPC.connect(port);
+    this._guestRPC.push(guestRPC);
+
+    guestRPC.call('sidebarLayoutChanged', this._layoutState);
   }
 
   _setupSidebarEvents() {
-    annotationCounts(document.body, this.guest.crossframe);
+    annotationCounts(document.body, this._sidebarRPC);
     sidebarTrigger(document.body, () => this.open());
-    features.init(this.guest.crossframe);
 
-    this.guest.crossframe.on('openSidebar', () => this.open());
-    this.guest.crossframe.on('closeSidebar', () => this.close());
+    this._sidebarRPC.on(
+      'featureFlagsUpdated',
+      /** @param {Record<string, boolean>} flags */ flags =>
+        this.features.update(flags)
+    );
 
-    // Re-publish the crossframe event so that anything extending Delegator
-    // can subscribe to it (without need for crossframe)
-    this.guest.crossframe.on('openNotebook', (
-      /** @type {string} */ groupId
-    ) => {
-      this.hide();
-      this._emitter.publish('openNotebook', groupId);
+    this._sidebarRPC.on('connect', () => {
+      // Show the UI
+      if (this.iframeContainer) {
+        this.iframeContainer.style.display = '';
+      }
+
+      const showHighlights = this._config.showHighlights === 'always';
+      this.setHighlightsVisible(showHighlights);
+
+      if (
+        this._config.openSidebar ||
+        this._config.annotations ||
+        this._config.query ||
+        this._config.group
+      ) {
+        this.open();
+      }
     });
+
+    this._sidebarRPC.on('showHighlights', () =>
+      this.setHighlightsVisible(true)
+    );
+
+    this._sidebarRPC.on('openSidebar', () => this.open());
+
+    this._sidebarRPC.on('closeSidebar', () => this.close());
+
+    // Sidebar listens to the `openNotebook` event coming from the sidebar's
+    // iframe and re-publishes it via the emitter to the Notebook
+    this._sidebarRPC.on(
+      'openNotebook',
+      /** @param {string} groupId */
+      groupId => {
+        this.hide();
+        this._emitter.publish('openNotebook', groupId);
+      }
+    );
+
     this._emitter.subscribe('closeNotebook', () => {
       this.show();
     });
 
+    /** @type {Array<[SidebarToHostEvent, Function|undefined]>} */
     const eventHandlers = [
-      [events.LOGIN_REQUESTED, this.onLoginRequest],
-      [events.LOGOUT_REQUESTED, this.onLogoutRequest],
-      [events.SIGNUP_REQUESTED, this.onSignupRequest],
-      [events.PROFILE_REQUESTED, this.onProfileRequest],
-      [events.HELP_REQUESTED, this.onHelpRequest],
+      ['loginRequested', this.onLoginRequest],
+      ['logoutRequested', this.onLogoutRequest],
+      ['signupRequested', this.onSignupRequest],
+      ['profileRequested', this.onProfileRequest],
+      ['helpRequested', this.onHelpRequest],
     ];
     eventHandlers.forEach(([event, handler]) => {
       if (handler) {
-        this.guest.crossframe.on(event, () => handler());
+        this._sidebarRPC.on(event, () => handler());
       }
     });
   }
@@ -241,7 +399,8 @@ export default class Sidebar {
   _setupGestures() {
     const toggleButton = this.toolbar.sidebarToggleButton;
     if (toggleButton) {
-      this._hammerManager = new Hammer.Manager(toggleButton).on(
+      this._hammerManager = new Hammer.Manager(toggleButton);
+      this._hammerManager.on(
         'panstart panend panleft panright',
         /* istanbul ignore next */
         event => this._onPan(event)
@@ -273,19 +432,23 @@ export default class Sidebar {
         if (width >= MIN_RESIZE) {
           this.iframeContainer.style.width = `${width}px`;
         }
-        this._notifyOfLayoutChange();
+        this._updateLayoutState();
       }
     });
   }
 
   /**
-   * Notify integrator when sidebar is opened, closed or resized.
+   * Update the current layout state and notify the embedder if they provided
+   * an `onLayoutChange` callback in the Hypothesis config, as well as guests
+   * so they can enable/adapt side-by-side mode.
+   *
+   * This is called when the sidebar is opened, closed or resized.
    *
    * @param {boolean} [expanded] -
    *   `true` or `false` if the sidebar is being directly opened or closed, as
    *   opposed to being resized via the sidebar's drag handles
    */
-  _notifyOfLayoutChange(expanded) {
+  _updateLayoutState(expanded) {
     // The sidebar structure is:
     //
     // [ Toolbar    ][                                   ]
@@ -296,8 +459,9 @@ export default class Sidebar {
     // its container.
 
     const toolbarWidth = (this.iframeContainer && this.toolbar.getWidth()) || 0;
-    const frame = /** @type {HTMLElement} */ (this.iframeContainer ??
-      this.externalFrame);
+    const frame = /** @type {HTMLElement} */ (
+      this.iframeContainer ?? this.externalFrame
+    );
     const rect = frame.getBoundingClientRect();
     const computedStyle = window.getComputedStyle(frame);
     const width = parseInt(computedStyle.width);
@@ -323,19 +487,21 @@ export default class Sidebar {
       expanded = frameVisibleWidth > toolbarWidth;
     }
 
-    const layoutState = /** @type LayoutState */ ({
+    const layoutState = /** @type {SidebarLayout} */ ({
       expanded,
       width: expanded ? frameVisibleWidth : toolbarWidth,
       height: rect.height,
+      toolbarWidth,
     });
 
+    this._layoutState = layoutState;
     if (this.onLayoutChange) {
       this.onLayoutChange(layoutState);
     }
 
-    this.guest.fitSideBySide(layoutState);
-
-    this._emitter.publish('sidebarLayoutChanged', layoutState);
+    this._guestRPC.forEach(rpc =>
+      rpc.call('sidebarLayoutChanged', layoutState)
+    );
   }
 
   /**
@@ -351,6 +517,7 @@ export default class Sidebar {
     }
   }
 
+  /** @param {HammerInput} event */
   _onPan(event) {
     const frame = this.iframeContainer;
     if (!frame) {
@@ -362,7 +529,7 @@ export default class Sidebar {
         this._resetGestureState();
 
         // Disable animated transition of sidebar position
-        frame.classList.add('annotator-no-transition');
+        frame.classList.add('sidebar-no-transition');
 
         // Disable pointer events on the iframe.
         frame.style.pointerEvents = 'none';
@@ -373,7 +540,7 @@ export default class Sidebar {
 
         break;
       case 'panend':
-        frame.classList.remove('annotator-no-transition');
+        frame.classList.remove('sidebar-no-transition');
 
         // Re-enable pointer events on the iframe.
         frame.style.pointerEvents = '';
@@ -405,46 +572,48 @@ export default class Sidebar {
   }
 
   open() {
-    this.guest.crossframe.call('sidebarOpened');
-    this._emitter.publish('sidebarOpened');
+    this._sidebarRPC.call('sidebarOpened');
 
     if (this.iframeContainer) {
       const width = this.iframeContainer.getBoundingClientRect().width;
       this.iframeContainer.style.marginLeft = `${-1 * width}px`;
-      this.iframeContainer.classList.remove('annotator-collapsed');
+      this.iframeContainer.classList.remove('sidebar-collapsed');
     }
 
     this.toolbar.sidebarOpen = true;
 
-    if (this.options.showHighlights === 'whenSidebarOpen') {
-      this.guest.setVisibleHighlights(true);
+    if (this._config.showHighlights === 'whenSidebarOpen') {
+      this.setHighlightsVisible(true);
     }
 
-    this._notifyOfLayoutChange(true);
+    this._updateLayoutState(true);
   }
 
   close() {
     if (this.iframeContainer) {
       this.iframeContainer.style.marginLeft = '';
-      this.iframeContainer.classList.add('annotator-collapsed');
+      this.iframeContainer.classList.add('sidebar-collapsed');
     }
 
     this.toolbar.sidebarOpen = false;
 
-    if (this.options.showHighlights === 'whenSidebarOpen') {
-      this.guest.setVisibleHighlights(false);
+    if (this._config.showHighlights === 'whenSidebarOpen') {
+      this.setHighlightsVisible(false);
     }
 
-    this._notifyOfLayoutChange(false);
+    this._updateLayoutState(false);
   }
 
   /**
-   * Hide or show highlights associated with annotations in the document.
+   * Set whether highlights are visible in guest frames.
    *
-   * @param {boolean} shouldShowHighlights
+   * @param {boolean} visible
    */
-  setAllVisibleHighlights(shouldShowHighlights) {
-    this.guest.crossframe.call('setVisibleHighlights', shouldShowHighlights);
+  setHighlightsVisible(visible) {
+    this.toolbar.highlightsVisible = visible;
+
+    // Notify sidebar app of change which will in turn reflect state to guest frames.
+    this._sidebarRPC.call('setHighlightsVisible', visible);
   }
 
   /**

@@ -1,6 +1,7 @@
 import { normalizeKeyName } from '@hypothesis/frontend-shared';
 import { useEffect, useRef } from 'preact/hooks';
 
+/** @param {HTMLElement} element */
 function isElementVisible(element) {
   return element.offsetParent !== null;
 }
@@ -8,9 +9,9 @@ function isElementVisible(element) {
 /**
  * @typedef MenuKeyboardNavigationProps
  * @prop {string} [className]
- * @prop {(e: KeyboardEvent) => any} [closeMenu] - Callback when the menu is closed via keyboard input
+ * @prop {(e: KeyboardEvent) => void} [closeMenu] - Callback when the menu is closed via keyboard input
  * @prop {boolean} [visible] - When  true`, sets focus on the first item in the list
- * @prop {Object} children - Array of nodes which may contain <MenuItems> or any nodes
+ * @prop {import('preact').ComponentChildren} children - Array of nodes which may contain <MenuItems> or any nodes
  */
 
 /**
@@ -28,10 +29,11 @@ export default function MenuKeyboardNavigation({
   children,
   visible,
 }) {
-  const menuRef = useRef(/** @type {HTMLDivElement|null} */ (null));
+  const menuRef = /** @type {{ current: HTMLDivElement }} */ (useRef());
 
   useEffect(() => {
-    let focusTimer = null;
+    /** @type {number|undefined} */
+    let focusTimer;
     if (visible) {
       focusTimer = setTimeout(() => {
         // The focus won't work without delaying rendering.
@@ -47,6 +49,7 @@ export default function MenuKeyboardNavigation({
     };
   }, [visible]);
 
+  /** @param {KeyboardEvent} event */
   const onKeyDown = event => {
     const menuItems = Array.from(
       /** @type {NodeListOf<HTMLElement>} */

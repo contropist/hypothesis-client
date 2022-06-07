@@ -1,8 +1,10 @@
 import * as fixtures from '../../test/annotation-fixtures';
 import * as annotationMetadata from '../annotation-metadata';
-
-const documentMetadata = annotationMetadata.documentMetadata;
-const domainAndTitle = annotationMetadata.domainAndTitle;
+import {
+  documentMetadata,
+  domainAndTitle,
+  isSaved,
+} from '../annotation-metadata';
 
 describe('sidebar/helpers/annotation-metadata', () => {
   const fakeAnnotation = (props = {}) => {
@@ -49,6 +51,14 @@ describe('sidebar/helpers/annotation-metadata', () => {
         it('returns the domain as the title', () => {
           const annotation = fakeAnnotation();
           assert.equal(documentMetadata(annotation).title, 'example.com');
+        });
+      });
+
+      ['http://localhost:5000', '[not a URL]'].forEach(uri => {
+        it('returns empty domain if URL is invalid or private', () => {
+          const annotation = fakeAnnotation({ uri });
+          const { domain } = documentMetadata(annotation);
+          assert.equal(domain, '');
         });
       });
     });
@@ -262,7 +272,7 @@ describe('sidebar/helpers/annotation-metadata', () => {
     });
   });
 
-  describe('.isHighlight', () => {
+  describe('isHighlight', () => {
     [
       {
         annotation: fixtures.newEmptyAnnotation(),
@@ -363,6 +373,47 @@ describe('sidebar/helpers/annotation-metadata', () => {
     });
   });
 
+  describe('annotationRole', () => {
+    it('correctly identifies the role of an annotation', () => {
+      // An annotation needs a `selector` or else it will be identified as a
+      // 'Page note'
+      const annotationAnnotation = {
+        ...fixtures.newAnnotation(),
+        target: [{ source: 'source', selector: [] }],
+      };
+      const highlightAnnotation = fixtures.oldHighlight();
+      const pageNoteAnnotation = fixtures.newPageNote();
+
+      // If an annotation is a reply of any sort, that will supersede.
+      // e.g. the label for a page note that is also a reply is "Reply"
+      // In practice, highlights are never replies.
+      const replyAnnotations = [
+        { ...annotationAnnotation, references: ['parent_annotation_id'] },
+        { ...highlightAnnotation, references: ['parent_annotation_id'] },
+        { ...pageNoteAnnotation, references: ['parent_annotation_id'] },
+        fixtures.oldReply(),
+      ];
+      assert.equal(
+        annotationMetadata.annotationRole(annotationAnnotation),
+        'Annotation'
+      );
+
+      assert.equal(
+        annotationMetadata.annotationRole(highlightAnnotation),
+        'Highlight'
+      );
+
+      assert.equal(
+        annotationMetadata.annotationRole(pageNoteAnnotation),
+        'Page note'
+      );
+
+      replyAnnotations.forEach(reply => {
+        assert.equal(annotationMetadata.annotationRole(reply), 'Reply');
+      });
+    });
+  });
+
   describe('isPublic', () => {
     it('returns true if an annotation is shared within a group', () => {
       assert.isTrue(annotationMetadata.isPublic(fixtures.publicAnnotation()));
@@ -441,6 +492,16 @@ describe('sidebar/helpers/annotation-metadata', () => {
         $anchorTimeout: true,
       });
       assert.isFalse(isWaitingToAnchor(pending));
+    });
+  });
+
+  describe('isSaved', () => {
+    it('returns true for saved annotations', () => {
+      assert.isTrue(isSaved(fixtures.defaultAnnotation()));
+    });
+
+    it('returns false for unsaved annotations', () => {
+      assert.isFalse(isSaved(fixtures.newAnnotation()));
     });
   });
 

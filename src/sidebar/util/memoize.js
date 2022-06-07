@@ -10,12 +10,14 @@
  * @param {(arg: Arg) => Result} fn
  * @return {(arg: Arg) => Result}
  */
-export default function memoize(fn) {
+export function memoize(fn) {
   if (fn.length !== 1) {
     throw new Error('Memoize input must be a function of one argument');
   }
 
+  /** @type {Arg} */
   let lastArg;
+  /** @type {Result} */
   let lastResult;
 
   return function (arg) {

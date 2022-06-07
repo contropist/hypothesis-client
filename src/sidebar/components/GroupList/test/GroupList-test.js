@@ -3,7 +3,7 @@ import { act } from 'preact/test-utils';
 
 import GroupList, { $imports } from '../GroupList';
 
-import mockImportedComponents from '../../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../../test-util/mock-imported-components';
 
 describe('GroupList', () => {
   let fakeServiceConfig;
@@ -57,8 +57,8 @@ describe('GroupList', () => {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      '../../store/use-store': { useStoreProxy: () => fakeStore },
-      '../../config/service-config': fakeServiceConfig,
+      '../../store': { useSidebarStore: () => fakeStore },
+      '../../config/service-config': { serviceConfig: fakeServiceConfig },
     });
   });
 
@@ -110,10 +110,12 @@ describe('GroupList', () => {
 
   it('sorts groups within each section by organization', () => {
     const testGroups = populateGroupSections();
-    const fakeGroupOrganizations = groups =>
+    const fakeGroupsByOrganization = groups =>
       groups.sort((a, b) => a.id.localeCompare(b.id));
     $imports.$mock({
-      '../../helpers/group-organizations': fakeGroupOrganizations,
+      '../../helpers/group-organizations': {
+        groupsByOrganization: fakeGroupsByOrganization,
+      },
     });
 
     const wrapper = createGroupList();
@@ -123,7 +125,7 @@ describe('GroupList', () => {
     sections.forEach(section => {
       assert.deepEqual(
         section.prop('groups'),
-        fakeGroupOrganizations(testGroups)
+        fakeGroupsByOrganization(testGroups)
       );
     });
   });
@@ -165,7 +167,9 @@ describe('GroupList', () => {
   context('when `isThirdPartyService` is true', () => {
     beforeEach(() => {
       $imports.$mock({
-        '../../helpers/is-third-party-service': () => true,
+        '../../helpers/is-third-party-service': {
+          isThirdPartyService: () => true,
+        },
       });
     });
 

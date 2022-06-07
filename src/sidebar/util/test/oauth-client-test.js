@@ -1,10 +1,7 @@
 import fetchMock from 'fetch-mock';
-import { stringify } from 'query-string';
-import sinon from 'sinon';
 
-import OAuthClient from '../oauth-client';
-
-import FakeWindow from '../../test/fake-window';
+import { FakeWindow } from '../../test/fake-window';
+import { OAuthClient, TokenError, $imports } from '../oauth-client';
 
 const fixtures = {
   tokenResponse: {
@@ -31,7 +28,6 @@ describe('sidebar/util/oauth-client', () => {
     authorizationEndpoint: 'https://annota.te/oauth/authorize',
     tokenEndpoint: 'https://annota.te/api/token',
     revokeEndpoint: 'https://annota.te/oauth/revoke',
-    generateState: () => 'notrandom',
   };
 
   beforeEach(() => {
@@ -44,6 +40,7 @@ describe('sidebar/util/oauth-client', () => {
   });
 
   afterEach(() => {
+    $imports.$restore();
     fetchMock.restore();
     clock.restore();
   });
@@ -89,7 +86,8 @@ describe('sidebar/util/oauth-client', () => {
         status: 400,
       });
       return client.exchangeAuthCode('unknowncode').catch(err => {
-        assert.equal(err.message, 'Authorization code exchange failed');
+        assert.instanceOf(err, TokenError);
+        assert.equal(err.message, 'Failed to fetch access token');
       });
     });
   });
@@ -122,7 +120,8 @@ describe('sidebar/util/oauth-client', () => {
         status: 400,
       });
       return client.exchangeGrantToken('unknowntoken').catch(err => {
-        assert.equal(err.message, 'Failed to retrieve access token');
+        assert.instanceOf(err, TokenError);
+        assert.equal(err.message, 'Failed to fetch access token');
       });
     });
   });
@@ -153,7 +152,8 @@ describe('sidebar/util/oauth-client', () => {
     it('rejects if the request fails', () => {
       fetchMock.post(config.tokenEndpoint, { status: 400 });
       return client.refreshToken('invalid-token').catch(err => {
-        assert.equal(err.message, 'Failed to refresh access token');
+        assert.instanceOf(err, TokenError);
+        assert.equal(err.message, 'Failed to fetch access token');
       });
     });
   });
@@ -171,38 +171,16 @@ describe('sidebar/util/oauth-client', () => {
     });
 
     it('resolves if the request succeeds', () => {
-      fetchMock.post(config.revokeEndpoint, { status: 200 });
+      fetchMock.post(config.revokeEndpoint, { status: 200, body: {} });
       return client.revokeToken('valid-access-token');
     });
 
     it('rejects if the request fails', () => {
       fetchMock.post(config.revokeEndpoint, { status: 400 });
       return client.revokeToken('invalid-token').catch(err => {
-        assert.equal(err.message, 'failed');
+        assert.instanceOf(err, TokenError);
+        assert.equal(err.message, 'Failed to revoke access token');
       });
-    });
-  });
-
-  describe('#openAuthPopupWindow', () => {
-    it('opens a popup window', () => {
-      const fakeWindow = new FakeWindow();
-      const popupWindow = OAuthClient.openAuthPopupWindow(fakeWindow);
-      assert.equal(popupWindow, fakeWindow.open.returnValues[0]);
-      assert.calledWith(
-        fakeWindow.open,
-        'about:blank',
-        'Log in to Hypothesis',
-        'height=430,left=274.5,top=169,width=475'
-      );
-    });
-
-    it('throws error if popup cannot be opened', () => {
-      const fakeWindow = new FakeWindow();
-      fakeWindow.open = sinon.stub().returns(null);
-
-      assert.throws(() => {
-        OAuthClient.openAuthPopupWindow(fakeWindow);
-      }, 'Failed to open login window');
     });
   });
 
@@ -211,16 +189,36 @@ describe('sidebar/util/oauth-client', () => {
 
     beforeEach(() => {
       fakeWindow = new FakeWindow();
+
+      $imports.$mock({
+        '../../shared/random': {
+          generateHexString: () => 'notrandom',
+        },
+      });
     });
 
     function authorize() {
-      const popupWindow = OAuthClient.openAuthPopupWindow(fakeWindow);
-      const authorized = client.authorize(fakeWindow, popupWindow);
-      return { authorized, popupWindow };
+      return client.authorize(fakeWindow);
     }
 
-    it('navigates the popup window to the authorization URL', () => {
-      const { authorized, popupWindow } = authorize();
+    it('opens a popup window at the authorization URL', async () => {
+      const authorized = authorize();
+
+      const params = new URLSearchParams({
+        client_id: config.clientId,
+        origin: 'https://client.hypothes.is',
+        response_mode: 'web_message',
+        response_type: 'code',
+        state: 'notrandom',
+      });
+      const expectedAuthURL = `${config.authorizationEndpoint}?${params}`;
+
+      assert.calledWith(
+        fakeWindow.open,
+        expectedAuthURL,
+        'Log in to Hypothesis',
+        'left=274.5,top=169,width=475,height=430'
+      );
 
       fakeWindow.sendMessage({
         type: 'authorization_response',
@@ -228,23 +226,25 @@ describe('sidebar/util/oauth-client', () => {
         state: 'notrandom',
       });
 
-      return authorized.then(() => {
-        const params = {
-          client_id: config.clientId,
-          origin: 'https://client.hypothes.is',
-          response_mode: 'web_message',
-          response_type: 'code',
-          state: 'notrandom',
-        };
-        const expectedAuthUrl = `${config.authorizationEndpoint}?${stringify(
-          params
-        )}`;
-        assert.equal(popupWindow.location.href, expectedAuthUrl);
-      });
+      await authorized;
+    });
+
+    it('rejects if popup cannot be opened', async () => {
+      fakeWindow.open = sinon.stub().returns(null);
+
+      let error;
+      try {
+        await authorize();
+      } catch (e) {
+        error = e;
+      }
+
+      assert.instanceOf(error, Error);
+      assert.equal(error.message, 'Failed to open login window');
     });
 
     it('resolves with an auth code if successful', () => {
-      const { authorized } = authorize();
+      const authorized = authorize();
 
       fakeWindow.sendMessage({
         type: 'authorization_response',
@@ -258,7 +258,7 @@ describe('sidebar/util/oauth-client', () => {
     });
 
     it('rejects with an error if canceled', () => {
-      const { authorized } = authorize();
+      const authorized = authorize();
 
       fakeWindow.sendMessage({
         type: 'authorization_canceled',
@@ -271,7 +271,7 @@ describe('sidebar/util/oauth-client', () => {
     });
 
     it('ignores responses with incorrect "state" values', () => {
-      const { authorized } = authorize();
+      const authorized = authorize();
 
       fakeWindow.sendMessage({
         type: 'authorization_response',

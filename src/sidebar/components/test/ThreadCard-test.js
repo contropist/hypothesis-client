@@ -1,16 +1,17 @@
 import { mount } from 'enzyme';
 
-import ThreadCard from '../ThreadCard';
-import { $imports } from '../ThreadCard';
+import ThreadCard, { $imports } from '../ThreadCard';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
 describe('ThreadCard', () => {
   let fakeDebounce;
   let fakeFrameSync;
   let fakeStore;
   let fakeThread;
+
+  const threadCardSelector = 'div[data-testid="thread-card"]';
 
   function createComponent(props) {
     return mount(
@@ -37,7 +38,7 @@ describe('ThreadCard', () => {
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
       'lodash.debounce': fakeDebounce,
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      '../store': { useSidebarStore: () => fakeStore },
     });
   });
 
@@ -55,14 +56,14 @@ describe('ThreadCard', () => {
 
     const wrapper = createComponent();
 
-    assert(wrapper.find('.ThreadCard').hasClass('is-focused'));
+    assert.isTrue(wrapper.find(threadCardSelector).hasClass('is-focused'));
   });
 
   describe('mouse and click events', () => {
     it('scrolls to the annotation when the `ThreadCard` is clicked', () => {
       const wrapper = createComponent();
 
-      wrapper.find('.ThreadCard').simulate('click');
+      wrapper.find(threadCardSelector).simulate('click');
 
       assert.calledWith(fakeFrameSync.scrollToAnnotation, 'myTag');
     });
@@ -70,7 +71,7 @@ describe('ThreadCard', () => {
     it('focuses the annotation thread when mouse enters', () => {
       const wrapper = createComponent();
 
-      wrapper.find('.ThreadCard').simulate('mouseenter');
+      wrapper.find(threadCardSelector).simulate('mouseenter');
 
       assert.calledWith(fakeFrameSync.focusAnnotations, sinon.match(['myTag']));
     });
@@ -78,7 +79,7 @@ describe('ThreadCard', () => {
     it('unfocuses the annotation thread when mouse exits', () => {
       const wrapper = createComponent();
 
-      wrapper.find('.ThreadCard').simulate('mouseleave');
+      wrapper.find(threadCardSelector).simulate('mouseleave');
 
       assert.calledWith(fakeFrameSync.focusAnnotations, sinon.match([]));
     });
@@ -90,10 +91,10 @@ describe('ThreadCard', () => {
         const nodeChild = document.createElement('div');
         nodeTarget.appendChild(nodeChild);
 
-        wrapper.find('.ThreadCard').props().onClick({
+        wrapper.find(threadCardSelector).props().onClick({
           target: nodeTarget,
         });
-        wrapper.find('.ThreadCard').props().onClick({
+        wrapper.find(threadCardSelector).props().onClick({
           target: nodeChild,
         });
         assert.notCalled(fakeFrameSync.scrollToAnnotation);

@@ -1,3 +1,4 @@
+import { fetchJSON } from '../util/fetch';
 import { retryPromiseOperation } from '../util/retry';
 
 /**
@@ -11,18 +12,16 @@ function getJSON(url) {
     // any additional headers/config so that we can use `<link rel="preload">` in
     // the `/app.html` response to fetch them early, while the client JS app
     // is loading.
-    fetch(url).then(response => {
-      if (response.status !== 200) {
-        throw new Error(`Fetching ${url} failed`);
-      }
-      return response.json();
-    })
+    fetchJSON(url)
   );
 }
 
 /**
+ * @typedef {import('../../types/api').IndexResponse} IndexResponse
+ * @typedef {import('../../types/api').LinksResponse} LinksResponse
  * @typedef {import('../../types/api').RouteMap} RouteMap
- * @typedef {import('../../types/config').SidebarConfig} SidebarConfig
+ * @typedef {import('../../types/api').RouteMetadata} RouteMetadata
+ * @typedef {import('../../types/config').SidebarSettings} SidebarSettings
  */
 
 /**
@@ -31,15 +30,15 @@ function getJSON(url) {
 // @inject
 export class APIRoutesService {
   /**
-   * @param {SidebarConfig} settings
+   * @param {SidebarSettings} settings
    */
   constructor(settings) {
-    this._apiUrl = settings.apiUrl;
+    this._apiURL = settings.apiUrl;
 
     /** @type {Promise<RouteMap>|null} */
     this._routeCache = null;
 
-    /** @type {Promise<Record<string,string>>|null} */
+    /** @type {Promise<LinksResponse>|null} */
     this._linkCache = null;
   }
 
@@ -53,7 +52,10 @@ export class APIRoutesService {
    */
   routes() {
     if (!this._routeCache) {
-      this._routeCache = getJSON(this._apiUrl).then(index => index.links);
+      this._routeCache = getJSON(this._apiURL).then(result => {
+        const index = /** @type {IndexResponse} */ (result);
+        return index.links;
+      });
     }
     return this._routeCache;
   }
@@ -61,13 +63,15 @@ export class APIRoutesService {
   /**
    * Fetch and cache service page links from the API.
    *
-   * @return {Promise<Record<string,string>>} - Map of link name to URL
+   * @return {Promise<LinksResponse>}
    */
   links() {
     if (!this._linkCache) {
-      this._linkCache = this.routes().then(routes =>
-        getJSON(/** @type {string} */ (routes.links.url))
-      );
+      this._linkCache = this.routes().then(async routes => {
+        const linksRoute = /** @type {RouteMetadata} */ (routes.links);
+        const links = await getJSON(linksRoute.url);
+        return /** @type {LinksResponse} */ (links);
+      });
     }
     return this._linkCache;
   }

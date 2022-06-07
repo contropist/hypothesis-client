@@ -1,11 +1,8 @@
 import { mount } from 'enzyme';
 import { act } from 'preact/test-utils';
 
+import { delay } from '../../../../test-util/wait';
 import GroupListItem, { $imports } from '../GroupListItem';
-
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
 
 describe('GroupListItem', () => {
   let fakeConfirm;
@@ -70,7 +67,7 @@ describe('GroupListItem', () => {
         copyText: fakeCopyText,
       },
       '../../helpers/group-list-item-common': fakeGroupListItemCommon,
-      '../../store/use-store': { useStoreProxy: () => fakeStore },
+      '../../store': { useSidebarStore: () => fakeStore },
       '../../../shared/prompts': { confirm: fakeConfirm },
     });
   });
@@ -304,7 +301,10 @@ describe('GroupListItem', () => {
       );
 
       const submenu = getSubmenu(wrapper);
-      assert.equal(submenu.exists('.GroupListItem__footer'), expectDisabled);
+      assert.equal(
+        submenu.exists('[data-testid="unselectable-group-note"]'),
+        expectDisabled
+      );
     });
   });
 
@@ -315,7 +315,7 @@ describe('GroupListItem', () => {
     });
     assert.equal(wrapper.find('MenuItem').first().prop('isDisabled'), true);
     const submenu = getSubmenu(wrapper);
-    assert.equal(submenu.exists('.GroupListItem__footer'), true);
+    assert.isTrue(submenu.exists('[data-testid="unselectable-group-note"]'));
   });
 
   [

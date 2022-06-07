@@ -1,15 +1,16 @@
-import hostPageConfig from '../host-config';
+import { addConfigFragment } from '../../../shared/config-fragment';
+import { hostPageConfig } from '../host-config';
 
 function fakeWindow(config) {
   return {
     location: {
-      hash: '#config=' + JSON.stringify(config),
+      href: addConfigFragment('https://hypothes.is/app.html', config),
     },
   };
 }
 
-describe('sidebar/config/host-config', function () {
-  it('parses config from location string and returns whitelisted params', function () {
+describe('sidebar/config/host-config', () => {
+  it('parses config from location string and returns whitelisted params', () => {
     const window_ = fakeWindow({
       annotations: '1234',
       group: 'abc12',
@@ -39,7 +40,7 @@ describe('sidebar/config/host-config', function () {
     });
   });
 
-  it('coerces `requestConfigFromFrame` and `openSidebar` values', function () {
+  it('coerces `requestConfigFromFrame` and `openSidebar` values', () => {
     const window_ = fakeWindow({
       openSidebar: 'false',
       requestConfigFromFrame: {
@@ -57,7 +58,7 @@ describe('sidebar/config/host-config', function () {
     });
   });
 
-  it('ignores non-whitelisted config params', function () {
+  it('ignores non-whitelisted config params', () => {
     const window_ = fakeWindow({
       apiUrl: 'https://not-the-hypothesis/api/',
     });
@@ -65,7 +66,7 @@ describe('sidebar/config/host-config', function () {
     assert.deepEqual(hostPageConfig(window_), {});
   });
 
-  it('ignores `null` values in config', function () {
+  it('ignores `null` values in config', () => {
     const window_ = fakeWindow({
       openSidebar: null,
     });

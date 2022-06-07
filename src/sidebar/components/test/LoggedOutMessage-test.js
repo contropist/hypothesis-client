@@ -1,10 +1,9 @@
 import { mount } from 'enzyme';
 
-import LoggedOutMessage from '../LoggedOutMessage';
-import { $imports } from '../LoggedOutMessage';
+import LoggedOutMessage, { $imports } from '../LoggedOutMessage';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
 describe('LoggedOutMessage', () => {
   let fakeStore;
@@ -20,7 +19,7 @@ describe('LoggedOutMessage', () => {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      '../store': { useSidebarStore: () => fakeStore },
     });
   });
 
@@ -31,7 +30,7 @@ describe('LoggedOutMessage', () => {
   it('should link to signup', () => {
     const wrapper = createLoggedOutMessage();
 
-    const signupLink = wrapper.find('.LoggedOutMessage__link').at(0);
+    const signupLink = wrapper.find('Link').at(0);
 
     assert.calledWith(fakeStore.getLink, 'signup');
     assert.equal(signupLink.prop('href'), 'signup_link');

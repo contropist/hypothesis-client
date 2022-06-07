@@ -10,17 +10,22 @@ class FakeWindow {
   }
 }
 
-describe('sidebar/cross-origin-rpc', function () {
+describe('sidebar/cross-origin-rpc', () => {
+  let fakeNormalizeGroupIds;
   let fakeStore;
   let fakeWarnOnce;
   let fakeWindow;
   let settings;
   let frame;
 
-  beforeEach(function () {
+  beforeEach(() => {
     fakeStore = {
+      allGroups: sinon.stub().returns([]),
       changeFocusModeUser: sinon.stub(),
+      filterGroups: sinon.stub(),
     };
+
+    fakeNormalizeGroupIds = sinon.stub().returns(['1', '2']);
 
     frame = { postMessage: sinon.stub() };
     fakeWindow = new FakeWindow();
@@ -32,7 +37,8 @@ describe('sidebar/cross-origin-rpc', function () {
     fakeWarnOnce = sinon.stub();
 
     $imports.$mock({
-      '../shared/warn-once': fakeWarnOnce,
+      './helpers/groups': { normalizeGroupIds: fakeNormalizeGroupIds },
+      '../shared/warn-once': { warnOnce: fakeWarnOnce },
     });
   });
 
@@ -40,8 +46,8 @@ describe('sidebar/cross-origin-rpc', function () {
     $imports.$restore();
   });
 
-  describe('#startServer', function () {
-    it('sends a response with the "ok" result', function () {
+  describe('#startServer', () => {
+    it('sends a response with the "ok" result', () => {
       startServer(fakeStore, settings, fakeWindow);
 
       fakeWindow.emitter.emit('message', {
@@ -64,7 +70,84 @@ describe('sidebar/cross-origin-rpc', function () {
       );
     });
 
-    it('calls the registered method with the provided params', function () {
+    describe('changeFocusModeUser', () => {
+      function callRPC(params) {
+        fakeWindow.emitter.emit('message', {
+          data: {
+            jsonrpc: '2.0',
+            method: 'changeFocusModeUser',
+            id: 42,
+            params,
+          },
+          origin: 'https://allowed1.com',
+          source: frame,
+        });
+      }
+
+      beforeEach(() => {
+        sinon.stub(console, 'error');
+      });
+
+      afterEach(() => {
+        console.error.restore();
+      });
+
+      it('sets the focused user', () => {
+        startServer(fakeStore, settings, fakeWindow);
+
+        callRPC([{ username: 'foobar', displayName: 'Simon Says' }]);
+
+        assert.calledWith(
+          fakeStore.changeFocusModeUser,
+          sinon.match({ username: 'foobar', displayName: 'Simon Says' })
+        );
+      });
+
+      context('groups provided', () => {
+        it('normalizes any provided group IDs and sets filtered groups', () => {
+          startServer(fakeStore, settings, fakeWindow);
+          fakeStore.allGroups.returns(['1', '2', '3']);
+          fakeNormalizeGroupIds.returns(['1', '2']);
+
+          callRPC([{ groups: ['1', '2', '3', '4'] }]);
+
+          assert.calledWith(
+            fakeNormalizeGroupIds,
+            ['1', '2', '3', '4'],
+            ['1', '2', '3']
+          );
+          assert.calledWith(fakeStore.filterGroups, ['1', '2']);
+          assert.notCalled(console.error);
+        });
+
+        it('logs an error if there are provided group IDs but none match any known groups', () => {
+          startServer(fakeStore, settings, fakeWindow);
+          fakeNormalizeGroupIds.returns([]);
+
+          callRPC([{ groups: ['1', '2', '3'] }]);
+
+          assert.calledWith(
+            console.error,
+            'No matching groups found in list of filtered group IDs'
+          );
+          assert.calledWith(fakeStore.filterGroups, []);
+        });
+      });
+
+      context('no groups provided', () => {
+        it('sets filtered groups to an empty set', () => {
+          startServer(fakeStore, settings, fakeWindow);
+          fakeNormalizeGroupIds.returns([]);
+
+          callRPC([{ groups: [] }]);
+
+          assert.calledWith(fakeStore.filterGroups, []);
+          assert.notCalled(console.error);
+        });
+      });
+    });
+
+    it('calls the registered method with the provided params', () => {
       startServer(fakeStore, settings, fakeWindow);
 
       fakeWindow.emitter.emit('message', {
@@ -78,12 +161,10 @@ describe('sidebar/cross-origin-rpc', function () {
         source: frame,
       });
 
-      assert.isTrue(
-        fakeStore.changeFocusModeUser.calledWithExactly('one', 'two')
-      );
+      assert.isTrue(fakeStore.changeFocusModeUser.calledWithExactly('one'));
     });
 
-    it('calls the registered method with no params', function () {
+    it('calls the registered method with no params', () => {
       startServer(fakeStore, settings, fakeWindow);
 
       fakeWindow.emitter.emit('message', {
@@ -95,10 +176,10 @@ describe('sidebar/cross-origin-rpc', function () {
         origin: 'https://allowed1.com',
         source: frame,
       });
-      assert.isTrue(fakeStore.changeFocusModeUser.calledWithExactly());
+      assert.isTrue(fakeStore.changeFocusModeUser.calledWithExactly(undefined));
     });
 
-    it('does not call the unregistered method', function () {
+    it('does not call the unregistered method', () => {
       startServer(fakeStore, settings, fakeWindow);
 
       fakeWindow.emitter.emit('message', {
@@ -132,8 +213,8 @@ describe('sidebar/cross-origin-rpc', function () {
       {},
       { rpcAllowedOrigins: [] },
       { rpcAllowedOrigins: ['https://allowed1.com', 'https://allowed2.com'] },
-    ].forEach(function (settings) {
-      it("doesn't respond if the origin isn't allowed", function () {
+    ].forEach(settings => {
+      it("doesn't respond if the origin isn't allowed", () => {
         startServer(fakeStore, settings, fakeWindow);
 
         fakeWindow.emitter.emit('message', {
@@ -150,7 +231,7 @@ describe('sidebar/cross-origin-rpc', function () {
       });
     });
 
-    it("responds with an error if there's no method", function () {
+    it("responds with an error if there's no method", () => {
       startServer(fakeStore, settings, fakeWindow);
       let jsonRpcRequest = { jsonrpc: '2.0', id: 42 }; // No "method" member.
 
@@ -176,13 +257,13 @@ describe('sidebar/cross-origin-rpc', function () {
       );
     });
 
-    ['unknownMethod', null].forEach(function (method) {
-      it('responds with an error if the method is unknown', function () {
+    ['unknownMethod', null].forEach(method => {
+      it('responds with an error if the method is unknown', () => {
         startServer(fakeStore, settings, fakeWindow);
 
         fakeWindow.emitter.emit('message', {
           origin: 'https://allowed1.com',
-          data: { jsonrpc: '2.0', method: method, id: 42 },
+          data: { jsonrpc: '2.0', method, id: 42 },
           source: frame,
         });
 
@@ -204,12 +285,12 @@ describe('sidebar/cross-origin-rpc', function () {
     });
   });
 
-  describe('#preStartServer', function () {
-    beforeEach(function () {
+  describe('#preStartServer', () => {
+    beforeEach(() => {
       preStartServer(fakeWindow);
     });
 
-    it('responds to an incoming request that arrives before the server starts', function () {
+    it('responds to an incoming request that arrives before the server starts', () => {
       fakeWindow.emitter.emit('message', {
         data: { jsonrpc: '2.0', method: 'changeFocusModeUser', id: 42 },
         origin: 'https://allowed1.com',
@@ -228,7 +309,7 @@ describe('sidebar/cross-origin-rpc', function () {
       );
     });
 
-    it('responds to multiple incoming requests that arrive before the server starts', function () {
+    it('responds to multiple incoming requests that arrive before the server starts', () => {
       const messageEvent = id => ({
         data: { jsonrpc: '2.0', method: 'changeFocusModeUser', id },
         origin: 'https://allowed1.com',
@@ -255,7 +336,7 @@ describe('sidebar/cross-origin-rpc', function () {
       assert.isTrue(frame.postMessage.calledWithExactly(...response(44)));
     });
 
-    it("does not respond to pre-start incoming requests if the origin isn't allowed", function () {
+    it("does not respond to pre-start incoming requests if the origin isn't allowed", () => {
       fakeWindow.emitter.emit('message', {
         data: { jsonrpc: '2.0', method: 'changeFocusModeUser', id: 42 },
         origin: 'https://fake.com',

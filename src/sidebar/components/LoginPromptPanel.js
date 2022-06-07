@@ -1,13 +1,13 @@
-import { LabeledButton } from '@hypothesis/frontend-shared';
+import { Actions, LabeledButton } from '@hypothesis/frontend-shared';
 
-import { useStoreProxy } from '../store/use-store';
+import { useSidebarStore } from '../store';
 
 import SidebarPanel from './SidebarPanel';
 
 /**
  * @typedef LoginPromptPanelProps
- * @prop {() => any} onLogin
- * @prop {() => any} onSignUp
+ * @prop {() => void} onLogin
+ * @prop {() => void} onSignUp
  */
 
 /**
@@ -16,7 +16,7 @@ import SidebarPanel from './SidebarPanel';
  * @param {LoginPromptPanelProps} props
  */
 export default function LoginPromptPanel({ onLogin, onSignUp }) {
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const isLoggedIn = store.isLoggedIn();
   if (isLoggedIn) {
     return null;
@@ -28,14 +28,14 @@ export default function LoginPromptPanel({ onLogin, onSignUp }) {
       panelName="loginPrompt"
     >
       <p>Please log in to create annotations or highlights.</p>
-      <div className="LoginPromptPanel__buttons">
+      <Actions>
         <LabeledButton title="Sign up" onClick={onSignUp}>
           Sign up
         </LabeledButton>
         <LabeledButton title="Log in" variant="primary" onClick={onLogin}>
           Log in
         </LabeledButton>
-      </div>
+      </Actions>
     </SidebarPanel>
   );
 }

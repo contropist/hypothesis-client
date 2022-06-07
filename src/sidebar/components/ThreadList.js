@@ -1,16 +1,16 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks';
+import classnames from 'classnames';
 import debounce from 'lodash.debounce';
 
-import { useStoreProxy } from '../store/use-store';
-import { isHighlight } from '../helpers/annotation-metadata';
-import { getElementHeightWithMargins } from '../util/dom';
+import { ListenerCollection } from '../../shared/listener-collection';
 import {
   calculateVisibleThreads,
   THREAD_DIMENSION_DEFAULTS,
 } from '../helpers/visible-threads';
+import { useSidebarStore } from '../store';
+import { getElementHeightWithMargins } from '../util/dom';
 
 import ThreadCard from './ThreadCard';
-import { ListenerCollection } from '../../annotator/util/listener-collection';
 
 /** @typedef {import('../helpers/build-thread').Thread} Thread */
 
@@ -48,25 +48,46 @@ function roundScrollPosition(pos) {
  * @param {ThreadListProps} props
  */
 function ThreadList({ threads }) {
-  // Height of the visible area of the scroll container.
-  const [scrollContainerHeight, setScrollContainerHeight] = useState(
-    window.innerHeight
-  );
+  // Client height of the scroll container.
+  const [scrollContainerHeight, setScrollContainerHeight] = useState(0);
 
-  // Scroll offset of scroll container. This is updated after the scroll
-  // container is scrolled, with debouncing to limit update frequency.
-  // These values are in multiples of `SCROLL_PRECISION` to optimize
-  // for performance.
+  // Scroll offset of scroll container, rounded to a multiple of `SCROLL_PRECISION`
+  // to avoid excessive re-renderings.
   const [scrollPosition, setScrollPosition] = useState(0);
 
+  // Measure the initial size and offset of the scroll container once rendering
+  // is complete and attach listeners to observe future size or scroll offset changes.
   useLayoutEffect(() => {
+    const listeners = new ListenerCollection();
     const scrollContainer = getScrollContainer();
+
     setScrollContainerHeight(scrollContainer.clientHeight);
     setScrollPosition(roundScrollPosition(scrollContainer.scrollTop));
+
+    const updateScrollPosition = debounce(
+      () => {
+        setScrollContainerHeight(scrollContainer.clientHeight);
+        setScrollPosition(roundScrollPosition(scrollContainer.scrollTop));
+      },
+      10,
+      { maxWait: 100 }
+    );
+
+    listeners.add(scrollContainer, 'scroll', updateScrollPosition);
+
+    // We currently assume that the scroll container's size only changes with
+    // the window as a whole. A more general approach would involve using
+    // ResizeObserver via the `observeElementSize` utility.
+    listeners.add(window, 'resize', updateScrollPosition);
+
+    return () => {
+      listeners.removeAll();
+      updateScrollPosition.cancel();
+    };
   }, []);
 
   // Map of thread ID to measured height of thread.
-  const [threadHeights, setThreadHeights] = useState({});
+  const [threadHeights, setThreadHeights] = useState(() => new Map());
 
   // ID of thread to scroll to after the next render. If the thread is not
   // present, the value persists until it can be "consumed".
@@ -76,30 +97,25 @@ function ThreadList({ threads }) {
 
   const topLevelThreads = threads;
 
-  const {
-    offscreenLowerHeight,
-    offscreenUpperHeight,
-    visibleThreads,
-  } = useMemo(
-    () =>
-      calculateVisibleThreads(
-        topLevelThreads,
-        threadHeights,
-        scrollPosition,
-        scrollContainerHeight
-      ),
-    [topLevelThreads, threadHeights, scrollPosition, scrollContainerHeight]
-  );
+  const { offscreenLowerHeight, offscreenUpperHeight, visibleThreads } =
+    useMemo(
+      () =>
+        calculateVisibleThreads(
+          topLevelThreads,
+          threadHeights,
+          scrollPosition,
+          scrollContainerHeight
+        ),
+      [topLevelThreads, threadHeights, scrollPosition, scrollContainerHeight]
+    );
 
-  const store = useStoreProxy();
+  const store = useSidebarStore();
 
   // Get the `$tag` of the most recently created unsaved annotation.
   const newAnnotationTag = (() => {
     // If multiple unsaved annotations exist, assume that the last one in the
     // list is the most recently created one.
-    const newAnnotations = store
-      .unsavedAnnotations()
-      .filter(ann => !ann.id && !isHighlight(ann));
+    const newAnnotations = store.unsavedAnnotations();
     if (!newAnnotations.length) {
       return null;
     }
@@ -135,8 +151,9 @@ function ThreadList({ threads }) {
     // Clear `scrollToId` so we don't scroll again after the next render.
     setScrollToId(null);
 
+    /** @param {Thread} thread */
     const getThreadHeight = thread =>
-      threadHeights[thread.id] || THREAD_DIMENSION_DEFAULTS.defaultHeight;
+      threadHeights.get(thread.id) || THREAD_DIMENSION_DEFAULTS.defaultHeight;
 
     const yOffset = topLevelThreads
       .slice(0, threadIndex)
@@ -146,52 +163,42 @@ function ThreadList({ threads }) {
     scrollContainer.scrollTop = yOffset;
   }, [scrollToId, topLevelThreads, threadHeights]);
 
-  // Attach listeners such that whenever the scroll container is scrolled or the
-  // window resized, a recalculation of visible threads is triggered
-  useEffect(() => {
-    const listeners = new ListenerCollection();
-    const scrollContainer = getScrollContainer();
-
-    const updateScrollPosition = debounce(
-      () => {
-        setScrollContainerHeight(scrollContainer.clientHeight);
-        setScrollPosition(roundScrollPosition(scrollContainer.scrollTop));
-      },
-      10,
-      { maxWait: 100 }
-    );
-
-    listeners.add(scrollContainer, 'scroll', updateScrollPosition);
-    listeners.add(window, 'resize', updateScrollPosition);
-
-    return () => {
-      listeners.removeAll();
-      updateScrollPosition.cancel();
-    };
-  }, []);
-
   // When the set of visible threads changes, recalculate the real rendered
   // heights of thread cards and update `threadHeights` state if there are changes.
   useEffect(() => {
     setThreadHeights(prevHeights => {
-      const changedHeights = {};
+      const changedHeights = new Map();
       for (let { id } of visibleThreads) {
-        const threadElement = /** @type {HTMLElement} */ (document.getElementById(
-          id
-        ));
+        const threadElement = /** @type {HTMLElement} */ (
+          document.getElementById(id)
+        );
+
+        if (!threadElement) {
+          // This could happen if the `ThreadList` DOM is not connected to the document.
+          //
+          // Errors earlier in the render can also potentially cause this (see
+          // https://github.com/hypothesis/client/pull/3665#issuecomment-895857072),
+          // although we don't in general try to make all effects robust to that
+          // as it is a problem that needs to be handled elsewhere.
+          console.warn(
+            'ThreadList could not measure thread. Element not found.'
+          );
+          return prevHeights;
+        }
+
         const height = getElementHeightWithMargins(threadElement);
-        if (height !== prevHeights[id]) {
-          changedHeights[id] = height;
+        if (height !== prevHeights.get(id)) {
+          changedHeights.set(id, height);
         }
       }
 
       // Skip update if no heights changed from previous measured values
       // (or defaults).
-      if (Object.keys(changedHeights).length === 0) {
+      if (changedHeights.size === 0) {
         return prevHeights;
       }
 
-      return { ...prevHeights, ...changedHeights };
+      return new Map([...prevHeights, ...changedHeights]);
     });
   }, [visibleThreads]);
 
@@ -199,7 +206,19 @@ function ThreadList({ threads }) {
     <div>
       <div style={{ height: offscreenUpperHeight }} />
       {visibleThreads.map(child => (
-        <div className="ThreadList__card" id={child.id} key={child.id}>
+        <div
+          className={classnames(
+            // The goal is to space out each annotation card vertically. Typically
+            // this is better handled by applying vertical spacing to the parent
+            // element (e.g. `space-y-3`) but in this case, the constraints of
+            // sibling divs before and after the list of annotation cards prevents
+            // this, so a bottom margin is added to each card's wrapping element.
+            'mb-3'
+          )}
+          data-testid="thread-card-container"
+          id={child.id}
+          key={child.id}
+        >
           <ThreadCard thread={child} />
         </div>
       ))}

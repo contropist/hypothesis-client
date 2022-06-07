@@ -2,8 +2,7 @@ import { mount } from 'enzyme';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
 
-import NotebookResultCount from '../NotebookResultCount';
-import { $imports } from '../NotebookResultCount';
+import NotebookResultCount, { $imports } from '../NotebookResultCount';
 
 describe('NotebookResultCount', () => {
   let fakeCountVisible;
@@ -26,7 +25,7 @@ describe('NotebookResultCount', () => {
     fakeUseRootThread = sinon.stub().returns({ children: [] });
 
     $imports.$mock({
-      './hooks/use-root-thread': fakeUseRootThread,
+      './hooks/use-root-thread': { useRootThread: fakeUseRootThread },
       '../helpers/thread': { countVisible: fakeCountVisible },
     });
   });
@@ -131,7 +130,7 @@ describe('NotebookResultCount', () => {
 
       const wrapper = createComponent({ isLoading: true, resultCount: 2 });
 
-      assert.equal(wrapper.text(), '(2 annotations)');
+      assert.include(wrapper.text(), '(2 annotations)');
     });
   });
 

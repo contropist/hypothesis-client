@@ -1,16 +1,15 @@
-import { SvgIcon, LinkButton } from '@hypothesis/frontend-shared';
+import { Icon, LinkButton } from '@hypothesis/frontend-shared';
 import { useMemo } from 'preact/hooks';
-import { withServices } from '../../service-context';
 
-import { useStoreProxy } from '../../store/use-store';
-import { isThirdPartyUser, username } from '../../helpers/account-id';
+import { withServices } from '../../service-context';
+import { useSidebarStore } from '../../store';
 import {
   domainAndTitle,
   isHighlight,
   isReply,
   hasBeenEdited,
 } from '../../helpers/annotation-metadata';
-import { annotationDisplayName } from '../../helpers/annotation-user';
+import { annotationAuthorInfo } from '../../helpers/annotation-user';
 import { isPrivate } from '../../helpers/permissions';
 
 import AnnotationDocumentInfo from './AnnotationDocumentInfo';
@@ -20,8 +19,17 @@ import AnnotationUser from './AnnotationUser';
 
 /**
  * @typedef {import("../../../types/api").Annotation} Annotation
- * @typedef {import('../../../types/config').MergedConfig} MergedConfig
+ * @typedef {import('../../../types/config').SidebarSettings} SidebarSettings
  */
+
+/** @param {{ children: import("preact").ComponentChildren}} props */
+function HeaderRow({ children }) {
+  return (
+    <div className="flex gap-x-1 items-baseline flex-wrap-reverse">
+      {children}
+    </div>
+  );
+}
 
 /**
  * @typedef AnnotationHeaderProps
@@ -29,7 +37,7 @@ import AnnotationUser from './AnnotationUser';
  * @prop {boolean} [isEditing] - Whether the annotation is actively being edited
  * @prop {number} replyCount - How many replies this annotation currently has
  * @prop {boolean} threadIsCollapsed - Is this thread currently collapsed?
- * @prop {MergedConfig} settings - Injected
+ * @prop {SidebarSettings} settings - Injected
  *
  */
 
@@ -47,47 +55,23 @@ function AnnotationHeader({
   threadIsCollapsed,
   settings,
 }) {
-  const store = useStoreProxy();
-  const defaultAuthority = store.defaultAuthority();
-  const displayNamesEnabled = store.isFeatureEnabled('client_display_names');
+  const store = useSidebarStore();
 
-  const isThirdParty = isThirdPartyUser(annotation.user, defaultAuthority);
-  const authorDisplayName = annotationDisplayName(
-    annotation,
-    isThirdParty,
-    displayNamesEnabled
+  const { authorDisplayName, authorLink } = useMemo(
+    () => annotationAuthorInfo(annotation, store, settings),
+    [annotation, store, settings]
   );
 
-  const authorLink = (() => {
-    if (!isThirdParty) {
-      return store.getLink('user', { user: annotation.user });
-    } else {
-      return (
-        (settings.usernameUrl &&
-          `${settings.usernameUrl}${username(annotation.user)}`) ??
-        undefined
-      );
-    }
-  })();
-
   const isCollapsedReply = isReply(annotation) && threadIsCollapsed;
-
-  const annotationIsPrivate = isPrivate(annotation.permissions);
 
   // Link (URL) to single-annotation view for this annotation, if it has
   // been provided by the service. Note: this property is not currently
   // present on third-party annotations.
   const annotationUrl = annotation.links?.html || '';
 
-  const showTimestamps = !isEditing && annotation.created;
   const showEditedTimestamp = useMemo(() => {
     return hasBeenEdited(annotation) && !isCollapsedReply;
   }, [annotation, isCollapsedReply]);
-
-  const replyPluralized = replyCount > 1 ? 'replies' : 'reply';
-  const replyButtonText = `${replyCount} ${replyPluralized}`;
-  const showReplyButton = replyCount > 0 && isCollapsedReply;
-  const showExtendedInfo = !isReply(annotation);
 
   // Pull together some document metadata related to this annotation
   const documentInfo = domainAndTitle(annotation);
@@ -113,12 +97,14 @@ function AnnotationHeader({
     // an ID.
     store.setExpanded(/** @type {string} */ (annotation.id), true);
 
+  const group = store.getGroup(annotation.group);
+
   return (
-    <header className="AnnotationHeader">
-      <div className="AnnotationHeader__row u-horizontal-rhythm">
-        {annotationIsPrivate && !isEditing && (
-          <SvgIcon
-            className="AnnotationHeader__icon"
+    <header>
+      <HeaderRow>
+        {isPrivate(annotation.permissions) && !isEditing && (
+          <Icon
+            classes="text-tiny"
             name="lock"
             title="This annotation is visible only to you"
           />
@@ -127,14 +113,14 @@ function AnnotationHeader({
           authorLink={authorLink}
           displayName={authorDisplayName}
         />
-        {showReplyButton && (
+        {replyCount > 0 && isCollapsedReply && (
           <LinkButton onClick={onReplyCountClick} title="Expand replies">
-            {replyButtonText}
+            {`${replyCount} ${replyCount > 1 ? 'replies' : 'reply'}`}
           </LinkButton>
         )}
 
-        {showTimestamps && (
-          <div className="u-layout-row--justify-right u-stretch">
+        {!isEditing && annotation.created && (
+          <div className="flex justify-end grow">
             <AnnotationTimestamps
               annotationCreated={annotation.created}
               annotationUpdated={annotation.updated}
@@ -143,20 +129,22 @@ function AnnotationHeader({
             />
           </div>
         )}
-      </div>
+      </HeaderRow>
 
-      {showExtendedInfo && (
-        <div className="AnnotationHeader__row u-horizontal-rhythm">
-          <AnnotationShareInfo annotation={annotation} />
+      {!isReply(annotation) && (
+        <HeaderRow>
+          {group && (
+            <AnnotationShareInfo
+              group={group}
+              isPrivate={isPrivate(annotation.permissions)}
+            />
+          )}
           {!isEditing && isHighlight(annotation) && (
-            <div className="AnnotationHeader__highlight">
-              <SvgIcon
-                name="highlight"
-                title="This is a highlight. Click 'edit' to add a note or tag."
-                inline={true}
-                className="AnnotationHeader__highlight-icon"
-              />
-            </div>
+            <Icon
+              name="highlight"
+              title="This is a highlight. Click 'edit' to add a note or tag."
+              classes="text-tiny text-color-text-light"
+            />
           )}
           {showDocumentInfo && (
             <AnnotationDocumentInfo
@@ -165,12 +153,10 @@ function AnnotationHeader({
               title={documentInfo.titleText}
             />
           )}
-        </div>
+        </HeaderRow>
       )}
     </header>
   );
 }
 
-AnnotationHeader.injectedProps = ['settings'];
-
-export default withServices(AnnotationHeader);
+export default withServices(AnnotationHeader, ['settings']);

@@ -1,11 +1,12 @@
-import { LabeledButton } from '@hypothesis/frontend-shared';
+import { Card, LabeledButton, Spinner } from '@hypothesis/frontend-shared';
+import classNames from 'classnames';
 
 import { useMemo } from 'preact/hooks';
 
 import { countVisible } from '../helpers/thread';
-import { useStoreProxy } from '../store/use-store';
+import { useSidebarStore } from '../store';
 
-import useRootThread from './hooks/use-root-thread';
+import { useRootThread } from './hooks/use-root-thread';
 
 /**
  * @typedef {import('../helpers/build-thread').Thread} Thread
@@ -68,38 +69,55 @@ function FilterStatusPanel({
   focusDisplayName,
   resultCount,
 }) {
+  const store = useSidebarStore();
   return (
-    <div className="FilterStatus">
-      <div className="u-layout-row--align-center">
-        <div className="FilterStatus__text">
-          {resultCount > 0 && <span>Showing </span>}
-          <span className="filter-facet">
-            {resultCount > 0 ? resultCount : 'No'}{' '}
-            {resultCount === 1 ? entitySingular : entityPlural}
-          </span>
-          {filterQuery && (
-            <span>
-              {' '}
-              for{' '}
-              <span className="filter-facet--pre">&#39;{filterQuery}&#39;</span>
-            </span>
-          )}
-          {focusDisplayName && (
-            <span>
-              {' '}
-              by <span className="filter-facet">{focusDisplayName}</span>
-            </span>
-          )}
-          {additionalCount > 0 && (
-            <span className="filter-facet--muted">
-              {' '}
-              (and {additionalCount} more)
-            </span>
-          )}
-        </div>
-        <div>{actionButton}</div>
+    <Card classes="mb-3 p-3">
+      <div className="flex items-center justify-center space-x-1">
+        {store.isLoading() ? (
+          <Spinner />
+        ) : (
+          <>
+            <div
+              className={classNames(
+                // Setting `min-width: 0` here allows wrapping to work as
+                // expected for long `filterQuery` strings. See
+                // https://css-tricks.com/flexbox-truncated-text/
+                'grow min-w-[0]'
+              )}
+              data-testid="filter-text"
+            >
+              {resultCount > 0 && <span>Showing </span>}
+              <span className="whitespace-nowrap font-bold">
+                {resultCount > 0 ? resultCount : 'No'}{' '}
+                {resultCount === 1 ? entitySingular : entityPlural}
+              </span>
+              {filterQuery && (
+                <span>
+                  {' '}
+                  for <span className="break-words">{`'${filterQuery}'`}</span>
+                </span>
+              )}
+              {focusDisplayName && (
+                <span>
+                  {' '}
+                  by{' '}
+                  <span className="whitespace-nowrap font-bold">
+                    {focusDisplayName}
+                  </span>
+                </span>
+              )}
+              {additionalCount > 0 && (
+                <span className="whitespace-nowrap italic text-color-text-light">
+                  {' '}
+                  (and {additionalCount} more)
+                </span>
+              )}
+            </div>
+            <div>{actionButton}</div>
+          </>
+        )}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -115,7 +133,7 @@ function FilterStatusPanel({
  * @param {FilterModeProps} props
  */
 function SelectionFilterStatus({ filterState, rootThread }) {
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const directLinkedId = store.directLinkedAnnotationId();
   // The total number of top-level annotations (visible or not)
   const totalCount = store.annotationCount();
@@ -170,7 +188,7 @@ function SelectionFilterStatus({ filterState, rootThread }) {
  * @param {FilterModeProps} props
  */
 function QueryFilterStatus({ filterState, rootThread }) {
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const visibleCount = countVisible(rootThread);
   const resultCount = visibleCount - filterState.forcedVisibleCount;
 
@@ -215,19 +233,23 @@ function QueryFilterStatus({ filterState, rootThread }) {
  * @param {FilterModeProps} props
  */
 function FocusFilterStatus({ filterState, rootThread }) {
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const visibleCount = countVisible(rootThread);
   const resultCount = visibleCount - filterState.forcedVisibleCount;
-  const buttonProps = {};
 
+  let buttonProps;
   if (filterState.forcedVisibleCount > 0) {
-    buttonProps.onClick = () => store.clearSelection();
-    buttonProps.title = 'Reset filters';
+    buttonProps = {
+      onClick: () => store.clearSelection(),
+      title: 'Reset filters',
+    };
   } else {
-    buttonProps.onClick = () => store.toggleFocusMode();
-    buttonProps.title = filterState.focusActive
-      ? 'Show all'
-      : `Show only ${filterState.focusDisplayName}`;
+    buttonProps = {
+      onClick: () => store.toggleFocusMode(),
+      title: filterState.focusActive
+        ? 'Show all'
+        : `Show only ${filterState.focusDisplayName}`,
+    };
   }
   const focusDisplayName = filterState.focusActive
     ? filterState.focusDisplayName
@@ -258,7 +280,7 @@ function FocusFilterStatus({ filterState, rootThread }) {
 export default function FilterStatus() {
   const rootThread = useRootThread();
 
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const focusState = store.focusState();
   const forcedVisibleCount = store.forcedVisibleThreads().length;
   const filterQuery = store.filterQuery();

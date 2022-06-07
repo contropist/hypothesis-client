@@ -1,5 +1,9 @@
 /* global PDFViewerApplication */
 
+import { warnOnce } from '../../shared/warn-once';
+import { translateOffsets } from '../util/normalize';
+import { matchQuote } from './match-quote';
+import { createPlaceholder } from './placeholder';
 import { TextPosition, TextRange } from './text-range';
 import { TextQuoteAnchor } from './types';
 
@@ -13,9 +17,9 @@ import { TextQuoteAnchor } from './types';
  */
 
 /**
- * @typedef PdfTextRange
+ * @typedef PDFTextRange
  * @prop {number} pageIndex
- * @prop {Object} anchor
+ * @prop {object} anchor
  * @prop {number} anchor.start - Start character offset within the page's text
  * @prop {number} anchor.end - End character offset within the page's text
  */
@@ -39,21 +43,31 @@ export const RenderingStates = {
 /**
  * Map of page index to page text content.
  *
- * @type {Object<number,Promise<string>>}
+ * @type {Map<number, Promise<string>>}
  */
-let pageTextCache = {};
+const pageTextCache = new Map();
 
 /**
- * A cache that maps a `(quote, text offset in document)` key to a specific
+ * A cache that maps a `{quote}:{offset}` key to a specific
  * location in the document.
  *
  * The components of the key come from an annotation's selectors. This is used
  * to speed up re-anchoring an annotation that was previously anchored in the
  * current session.
  *
- * @type {Object<string, Object<number, PdfTextRange>>}
+ * @type {Map<string, PDFTextRange>}
  */
-let quotePositionCache = {};
+const quotePositionCache = new Map();
+
+/**
+ * Return a cache key for lookups in `quotePositionCache`.
+ *
+ * @param {string} quote
+ * @param {number} [pos] - Offset in document text
+ */
+function quotePositionCacheKey(quote, pos) {
+  return `${quote}:${pos}`;
+}
 
 /**
  * Return offset of `node` among its siblings
@@ -85,7 +99,7 @@ function getNodeTextLayer(node) {
  *
  * @return {PDFViewer}
  */
-function getPdfViewer() {
+function getPDFViewer() {
   // @ts-ignore - TS doesn't know about PDFViewerApplication global.
   return PDFViewerApplication.pdfViewer;
 }
@@ -101,7 +115,7 @@ function getPdfViewer() {
  * @return {Promise<PDFPageView>}
  */
 async function getPageView(pageIndex) {
-  const pdfViewer = getPdfViewer();
+  const pdfViewer = getPDFViewer();
   let pageView = pdfViewer.getPageView(pageIndex);
 
   if (!pageView || !pageView.pdfPage) {
@@ -139,7 +153,7 @@ async function getPageView(pageIndex) {
  * Return true if the document has selectable text.
  */
 export async function documentHasText() {
-  const viewer = getPdfViewer();
+  const viewer = getPDFViewer();
   let hasText = false;
   for (let i = 0; i < viewer.pagesCount; i++) {
     const pageText = await getPageTextContent(i);
@@ -154,129 +168,120 @@ export async function documentHasText() {
 /**
  * Return the text of a given PDF page.
  *
+ * The text returned by this function should match the `textContent` of the text
+ * layer element that PDF.js creates for rendered pages, with the exception
+ * that differences in whitespace are tolerated.
+ *
  * @param {number} pageIndex
  * @return {Promise<string>}
  */
-async function getPageTextContent(pageIndex) {
-  if (pageTextCache[pageIndex]) {
-    return pageTextCache[pageIndex];
+function getPageTextContent(pageIndex) {
+  // If we already have or are fetching the text for this page, return the
+  // existing result.
+  const cachedText = pageTextCache.get(pageIndex);
+  if (cachedText) {
+    return cachedText;
   }
 
-  // Join together PDF.js `TextItem`s representing pieces of text in a PDF page.
-  const joinItems = items => {
-    // Skip empty items since PDF.js leaves their text layer divs blank.
-    // Excluding them makes our measurements match the rendered text layer.
-    // Otherwise, the selectors we generate would not match this stored text.
-    // See the `appendText` method of `TextLayerBuilder` in PDF.js.
-    const nonEmpty = items
-      .filter(item => /\S/.test(item.str))
-      .map(item => item.str);
-    const textContent = nonEmpty.join('');
-    return textContent;
-  };
-
-  // Fetch the text content for a given page as a string.
-  const getTextContent = async pageIndex => {
+  const getPageText = async () => {
     const pageView = await getPageView(pageIndex);
     const textContent = await pageView.pdfPage.getTextContent({
+      // Deprecated option, set for compatibility with older PDF.js releases.
       normalizeWhitespace: true,
     });
-    return joinItems(textContent.items);
+    return textContent.items.map(it => it.str).join('');
   };
 
-  pageTextCache[pageIndex] = getTextContent(pageIndex);
-
-  return pageTextCache[pageIndex];
+  // This function synchronously populates the cache with a promise so that
+  // multiple calls don't call `PDFPageProxy.getTextContent` twice.
+  const pageText = getPageText();
+  pageTextCache.set(pageIndex, pageText);
+  return pageText;
 }
 
 /**
- * Return the offset in the text for the whole document at which the text for
- * `pageIndex` begins.
+ * Find the offset within the document's text at which a page begins.
  *
  * @param {number} pageIndex
- * @return {Promise<number>} - Character position at which page text starts
+ * @return {Promise<number>} - Offset of page's text within document text
  */
-function getPageOffset(pageIndex) {
-  let index = -1;
-
-  const next = offset => {
-    ++index;
-    if (index === pageIndex) {
-      return Promise.resolve(offset);
-    }
-
-    return getPageTextContent(index).then(textContent =>
-      next(offset + textContent.length)
-    );
-  };
-
-  return next(0);
+async function getPageOffset(pageIndex) {
+  const viewer = getPDFViewer();
+  if (pageIndex >= viewer.pagesCount) {
+    /* istanbul ignore next - This should never be triggered */
+    throw new Error('Invalid page index');
+  }
+  let offset = 0;
+  for (let i = 0; i < pageIndex; i++) {
+    const text = await getPageTextContent(i);
+    offset += text.length;
+  }
+  return offset;
 }
 
 /**
- * Information about the page where a particular character position in the
- * text of the document occurs.
- *
  * @typedef PageOffset
- * @prop {number} index - Index of page containing offset
- * @prop {number} offset -
- *  Character position of the start of `textContent`
- *  within the full text of the document
- * @prop {string} textContent - Full text of page containing offset
+ * @prop {number} index - Page index
+ * @prop {number} offset - Character offset of start of page within document text
+ * @prop {string} text - Text of page
  */
 
 /**
- * Find the index and text content of a page containing the character position
- * `offset` within the complete text of the document.
+ * Find the page containing a text offset within the document.
+ *
+ * If the offset is invalid (less than 0 or greater than the length of the document)
+ * then the nearest (first or last) page is returned.
  *
  * @param {number} offset
  * @return {Promise<PageOffset>}
  */
-function findPage(offset) {
-  let index = 0;
-  let total = 0;
+async function findPageByOffset(offset) {
+  const viewer = getPDFViewer();
 
-  // We call `count` once for each page, in order. The passed offset is found on
-  // the first page where the cumulative length of the text content exceeds the
-  // offset value.
-  //
-  // When we find the page the offset is on, we return an object containing the
-  // page index, the offset at the start of that page, and the textContent of
-  // that page.
-  //
-  // To understand this a little better, here's a worked example. Imagine a
-  // document with the following page lengths:
-  //
-  //    Page 0 has length 100
-  //    Page 1 has length 50
-  //    Page 2 has length 50
-  //
-  // Then here are the pages that various offsets are found on:
-  //
-  //    offset | index
-  //    --------------
-  //    0      | 0
-  //    99     | 0
-  //    100    | 1
-  //    101    | 1
-  //    149    | 1
-  //    150    | 2
-  const count = textContent => {
-    const lastPageIndex = getPdfViewer().pagesCount - 1;
-    if (total + textContent.length > offset || index === lastPageIndex) {
-      // Offset is in current page.
-      offset = total;
-      return Promise.resolve({ index, offset, textContent });
-    } else {
-      // Offset is within a subsequent page.
-      ++index;
-      total += textContent.length;
-      return getPageTextContent(index).then(count);
+  let pageStartOffset = 0;
+  let pageEndOffset = 0;
+  let text = '';
+
+  for (let i = 0; i < viewer.pagesCount; i++) {
+    text = await getPageTextContent(i);
+    pageStartOffset = pageEndOffset;
+    pageEndOffset += text.length;
+
+    if (pageEndOffset >= offset) {
+      return { index: i, offset: pageStartOffset, text };
     }
-  };
+  }
 
-  return getPageTextContent(0).then(count);
+  // If the offset is beyond the end of the document, just pretend it was on
+  // the last page.
+  return { index: viewer.pagesCount - 1, offset: pageStartOffset, text };
 }
+
+/**
+ * Return true if `char` is an ASCII space.
+ *
+ * This is more efficient than `/\s/.test(char)` but does not handle Unicode
+ * spaces.
+ *
+ * @param {string} char
+ */
+function isSpace(char) {
+  switch (char) {
+    case ' ':
+    case '\f':
+    case '\n':
+    case '\r':
+    case '\t':
+    case '\v':
+    case '\u00a0': // nbsp
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** @param {string} char */
+const isNotSpace = char => !isSpace(char);
 
 /**
  * Locate the DOM Range which a position selector refers to.
@@ -293,7 +298,10 @@ function findPage(offset) {
  * @return {Promise<Range>}
  */
 async function anchorByPosition(pageIndex, start, end) {
-  const page = await getPageView(pageIndex);
+  const [page, pageText] = await Promise.all([
+    getPageView(pageIndex),
+    getPageTextContent(pageIndex),
+  ]);
 
   if (
     page.renderingState === RenderingStates.FINISHED &&
@@ -301,21 +309,40 @@ async function anchorByPosition(pageIndex, start, end) {
     page.textLayer.renderingDone
   ) {
     // The page has been rendered. Locate the position in the text layer.
+    //
+    // We allow for differences in whitespace between the text returned by
+    // `getPageTextContent` and the text layer content. Any other differences
+    // will cause mis-anchoring.
+
     const root = page.textLayer.textLayerDiv;
-    const startPos = new TextPosition(root, start);
-    const endPos = new TextPosition(root, end);
+    const textLayerStr = /** @type {string} */ (root.textContent);
+
+    const [textLayerStart, textLayerEnd] = translateOffsets(
+      pageText,
+      textLayerStr,
+      start,
+      end,
+      isNotSpace
+    );
+
+    const textLayerQuote = stripSpaces(
+      textLayerStr.slice(textLayerStart, textLayerEnd)
+    );
+    const pageTextQuote = stripSpaces(pageText.slice(start, end));
+    if (textLayerQuote !== pageTextQuote) {
+      warnOnce(
+        'Text layer text does not match page text. Highlights will be mis-aligned.'
+      );
+    }
+
+    const startPos = new TextPosition(root, textLayerStart);
+    const endPos = new TextPosition(root, textLayerEnd);
     return new TextRange(startPos, endPos).toRange();
   }
 
   // The page has not been rendered yet. Create a placeholder element and
   // anchor to that instead.
-  let placeholder = page.div.querySelector('.annotator-placeholder');
-  if (!placeholder) {
-    placeholder = document.createElement('span');
-    placeholder.classList.add('annotator-placeholder');
-    placeholder.textContent = 'Loading annotations…';
-    page.div.appendChild(placeholder);
-  }
+  const placeholder = createPlaceholder(page.div);
   const range = document.createRange();
   range.setStartBefore(placeholder);
   range.setEndAfter(placeholder);
@@ -323,179 +350,259 @@ async function anchorByPosition(pageIndex, start, end) {
 }
 
 /**
- * Search for a quote in the given pages.
+ * Return a string with spaces stripped.
  *
- * @param {number[]} pageIndexes - Pages to search in priority order
- * @param {TextQuoteSelector} quoteSelector
- * @param {Object} positionHint - Options to pass to `TextQuoteAnchor#toPositionAnchor`
- * @return {Promise<Range>} Location of quote
+ * This function optimizes for performance of stripping the main space chars
+ * that PDF.js generates over handling all kinds of whitespace that could
+ * occur in a string.
+ *
+ * @param {string} str
  */
-function findInPages(pageIndexes, quoteSelector, positionHint) {
-  if (pageIndexes.length === 0) {
-    // We reached the end of the document without finding a match for the quote.
-    return Promise.reject(new Error('Quote not found'));
+function stripSpaces(str) {
+  let stripped = '';
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (isSpace(char)) {
+      continue;
+    }
+    stripped += char;
   }
-
-  const [pageIndex, ...rest] = pageIndexes;
-
-  const content = getPageTextContent(pageIndex);
-  const offset = getPageOffset(pageIndex);
-
-  const attempt = ([content, offset]) => {
-    const root = document.createElement('div');
-    root.textContent = content;
-    const anchor = TextQuoteAnchor.fromSelector(root, quoteSelector);
-    if (positionHint) {
-      let hint = positionHint.start - offset;
-      hint = Math.max(0, hint);
-      hint = Math.min(hint, content.length);
-      return anchor.toPositionAnchor({ hint });
-    }
-    return anchor.toPositionAnchor();
-  };
-
-  const next = () => findInPages(rest, quoteSelector, positionHint);
-
-  const cacheAndFinish = anchor => {
-    if (positionHint) {
-      if (!quotePositionCache[quoteSelector.exact]) {
-        quotePositionCache[quoteSelector.exact] = {};
-      }
-      quotePositionCache[quoteSelector.exact][positionHint.start] = {
-        pageIndex,
-        anchor,
-      };
-    }
-    return anchorByPosition(pageIndex, anchor.start, anchor.end);
-  };
-
-  // First, get the text offset and other details of the current page.
-  return (
-    Promise.all([content, offset])
-      // Attempt to locate the quote in the current page.
-      .then(attempt)
-      // If the quote is located, find the DOM range and return it.
-      .then(cacheAndFinish)
-      // If the quote was not found, try the next page.
-      .catch(next)
-  );
+  return stripped;
 }
 
 /**
- * Return a list of page indexes to search for a quote in priority order.
+ * Search for a quote in the given pages.
  *
- * When a position anchor is available, quote search can be optimized by
- * searching pages nearest the expected position first.
+ * When comparing quote selectors to document text, ASCII whitespace characters
+ * are ignored. This is because text extracted from a PDF by different PDF
+ * viewers, including different versions of PDF.js, can often differ in the
+ * whitespace between characters and words. For a long time PDF.js in particular
+ * had issues where it would often produce extra spaces between characters that
+ * should not be there or omit spaces between words.
  *
- * @param {number} position - Text offset from start of document
- * @return {Promise<number[]>}
+ * @param {TextQuoteSelector} quoteSelector
+ * @param {number} [positionHint] - Expected start offset of quote
+ * @return {Promise<Range>} Location of quote
  */
-function prioritizePages(position) {
-  const pageCount = getPdfViewer().pagesCount;
-  const pageIndices = Array(pageCount)
+async function anchorQuote(quoteSelector, positionHint) {
+  // Determine which pages to search and in what order. If we have a position
+  // hint we'll try to use that. Otherwise we'll just search all pages in order.
+  const pageCount = getPDFViewer().pagesCount;
+  const pageIndexes = Array(pageCount)
     .fill(0)
     .map((_, i) => i);
 
-  if (!position) {
-    return Promise.resolve(pageIndices);
+  let expectedPageIndex;
+  let expectedOffsetInPage;
+
+  if (positionHint) {
+    const { index, offset } = await findPageByOffset(positionHint);
+    expectedPageIndex = index;
+    expectedOffsetInPage = positionHint - offset;
+
+    // Sort pages by distance from the page where we expect to find the quote,
+    // based on the position hint.
+    pageIndexes.sort((a, b) => {
+      const distA = Math.abs(a - index);
+      const distB = Math.abs(b - index);
+      return distA - distB;
+    });
   }
 
-  /**
-   * Sort page indexes by offset from `pageIndex`.
-   *
-   * @param {number} pageIndex
-   */
-  function sortPages(pageIndex) {
-    const left = pageIndices.slice(0, pageIndex);
-    const right = pageIndices.slice(pageIndex);
-    const result = [];
-    while (left.length > 0 || right.length > 0) {
-      if (right.length) {
-        result.push(/** @type {number} */ (right.shift()));
-      }
-      if (left.length) {
-        result.push(/** @type {number} */ (left.pop()));
+  // Search pages for the best match, ignoring whitespace differences.
+  const strippedPrefix =
+    quoteSelector.prefix !== undefined
+      ? stripSpaces(quoteSelector.prefix)
+      : undefined;
+  const strippedSuffix =
+    quoteSelector.suffix !== undefined
+      ? stripSpaces(quoteSelector.suffix)
+      : undefined;
+  const strippedQuote = stripSpaces(quoteSelector.exact);
+
+  let bestMatch;
+  for (let page of pageIndexes) {
+    const text = await getPageTextContent(page);
+    const strippedText = stripSpaces(text);
+
+    // Determine expected offset of quote in current page based on position hint.
+    let strippedHint;
+    if (expectedPageIndex !== undefined && expectedOffsetInPage !== undefined) {
+      if (page < expectedPageIndex) {
+        strippedHint = strippedText.length; // Prefer matches closer to end of page.
+      } else if (page === expectedPageIndex) {
+        // Translate expected offset in whitespace-inclusive version of page
+        // text into offset in whitespace-stripped version of page text.
+        [strippedHint] = translateOffsets(
+          text,
+          strippedText,
+          expectedOffsetInPage,
+          expectedOffsetInPage,
+          isNotSpace
+        );
+      } else {
+        strippedHint = 0; // Prefer matches closer to start of page.
       }
     }
-    return result;
+
+    const match = matchQuote(strippedText, strippedQuote, {
+      prefix: strippedPrefix,
+      suffix: strippedSuffix,
+      hint: strippedHint,
+    });
+
+    if (!match) {
+      continue;
+    }
+
+    if (!bestMatch || match.score > bestMatch.match.score) {
+      // Translate match offset from whitespace-stripped version of page text
+      // back to original text.
+      const [start, end] = translateOffsets(
+        strippedText,
+        text,
+        match.start,
+        match.end,
+        isNotSpace
+      );
+      bestMatch = {
+        page,
+        match: {
+          start,
+          end,
+          score: match.score,
+        },
+      };
+
+      // If we find a very good match, stop early.
+      //
+      // There is a tradeoff here between optimizing search performance and
+      // ensuring that we have found the best match in the document.
+      //
+      // The current heuristics are that we require an exact match for the quote
+      // and either the preceding or following context. The context matching
+      // helps to avoid incorrectly stopping the search early if the quote is
+      // a word or phrase that is common in the document.
+      const exactQuoteMatch =
+        strippedText.slice(match.start, match.end) === strippedQuote;
+
+      const exactPrefixMatch =
+        strippedPrefix !== undefined &&
+        strippedText.slice(
+          Math.max(0, match.start - strippedPrefix.length),
+          match.start
+        ) === strippedPrefix;
+
+      const exactSuffixMatch =
+        strippedSuffix !== undefined &&
+        strippedText.slice(match.end, strippedSuffix.length) === strippedSuffix;
+
+      const hasContext =
+        strippedPrefix !== undefined || strippedSuffix !== undefined;
+
+      if (
+        exactQuoteMatch &&
+        (exactPrefixMatch || exactSuffixMatch || !hasContext)
+      ) {
+        break;
+      }
+    }
   }
 
-  return findPage(position).then(({ index }) => sortPages(index));
+  if (bestMatch) {
+    const { page, match } = bestMatch;
+
+    // If we found a match, optimize future anchoring of this selector in the
+    // same session by caching the match location.
+    if (positionHint) {
+      const cacheKey = quotePositionCacheKey(quoteSelector.exact, positionHint);
+      quotePositionCache.set(cacheKey, {
+        pageIndex: page,
+        anchor: match,
+      });
+    }
+
+    // Convert the (start, end) position match into a DOM range.
+    return anchorByPosition(page, match.start, match.end);
+  }
+
+  throw new Error('Quote not found');
 }
 
 /**
  * Anchor a set of selectors to a DOM Range.
  *
+ * `selectors` must include a `TextQuoteSelector` and may include other selector
+ * types.
+ *
  * @param {HTMLElement} root
- * @param {Selector[]} selectors - Selector objects to anchor
+ * @param {Selector[]} selectors
  * @return {Promise<Range>}
  */
-export function anchor(root, selectors) {
-  const position = /** @type {TextPositionSelector|undefined} */ (selectors.find(
-    s => s.type === 'TextPositionSelector'
-  ));
-  const quote = /** @type {TextQuoteSelector|undefined} */ (selectors.find(
-    s => s.type === 'TextQuoteSelector'
-  ));
+export async function anchor(root, selectors) {
+  const quote = /** @type {TextQuoteSelector|undefined} */ (
+    selectors.find(s => s.type === 'TextQuoteSelector')
+  );
 
-  /** @type {Promise<Range>} */
-  let result = Promise.reject('unable to anchor');
+  // The quote selector is required in order to check that text position
+  // selector results are still valid.
+  if (!quote) {
+    throw new Error('No quote selector found');
+  }
 
-  const checkQuote = range => {
-    if (quote && quote.exact !== range.toString()) {
-      throw new Error('quote mismatch');
-    }
-    return range;
-  };
+  const position = /** @type {TextPositionSelector|undefined} */ (
+    selectors.find(s => s.type === 'TextPositionSelector')
+  );
 
   if (position) {
-    result = result.catch(() => {
-      return findPage(position.start).then(({ index, offset, textContent }) => {
-        const start = position.start - offset;
-        const end = position.end - offset;
-        const length = end - start;
+    // If we have a position selector, try using that first as it is the fastest
+    // anchoring method.
+    try {
+      const { index, offset, text } = await findPageByOffset(position.start);
+      const start = position.start - offset;
+      const end = position.end - offset;
 
-        checkQuote(textContent.substr(start, length));
-
-        return anchorByPosition(index, start, end);
-      });
-    });
-  }
-
-  if (quote) {
-    result = result.catch(() => {
-      if (
-        position &&
-        quotePositionCache[quote.exact] &&
-        quotePositionCache[quote.exact][position.start]
-      ) {
-        const { pageIndex, anchor } = quotePositionCache[quote.exact][
-          position.start
-        ];
-        return anchorByPosition(pageIndex, anchor.start, anchor.end);
+      const matchedText = text.substring(start, end);
+      if (quote.exact !== matchedText) {
+        throw new Error('quote mismatch');
       }
 
-      return prioritizePages(position?.start ?? 0).then(pageIndices => {
-        return findInPages(pageIndices, quote, position);
-      });
-    });
+      const range = await anchorByPosition(index, start, end);
+      return range;
+    } catch {
+      // Fall back to quote selector
+    }
+
+    // If anchoring with the position failed, check for a cached quote-based
+    // match using the quote + position as a cache key.
+    try {
+      const cacheKey = quotePositionCacheKey(quote.exact, position.start);
+      const cachedPos = quotePositionCache.get(cacheKey);
+      if (cachedPos) {
+        const { pageIndex, anchor } = cachedPos;
+        const range = await anchorByPosition(
+          pageIndex,
+          anchor.start,
+          anchor.end
+        );
+        return range;
+      }
+    } catch {
+      // Fall back to uncached quote selector match
+    }
   }
 
-  return result;
+  return anchorQuote(quote, position?.start);
 }
 
 /**
- * Convert a DOM Range object into a set of selectors.
+ * Prepare a DOM range for generating selectors and find the containing text layer.
  *
- * Converts a DOM `Range` object into a `[position, quote]` tuple of selectors
- * which can be saved with an annotation and later passed to `anchor` to
- * convert the selectors back to a `Range`.
- *
- * @param {HTMLElement} root - The root element
  * @param {Range} range
- * @return {Promise<Selector[]>}
+ * @return {[Range, Element]}
+ * @throws If the range cannot be annotated
  */
-export async function describe(root, range) {
+function getTextLayerForRange(range) {
   // "Shrink" the range so that the start and endpoints are at offsets within
   // text nodes rather than any containing nodes.
   try {
@@ -515,18 +622,52 @@ export async function describe(root, range) {
     throw new Error('Selecting across page breaks is not supported');
   }
 
+  return [range, startTextLayer];
+}
+
+/**
+ * Return true if selectors can be generated for a range using `describe`.
+ *
+ * This function is faster than calling `describe` if the selectors are not
+ * required.
+ *
+ * @param {Range} range
+ */
+export function canDescribe(range) {
+  try {
+    getTextLayerForRange(range);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Convert a DOM Range object into a set of selectors.
+ *
+ * Converts a DOM `Range` object into a `[position, quote]` tuple of selectors
+ * which can be saved with an annotation and later passed to `anchor` to
+ * convert the selectors back to a `Range`.
+ *
+ * @param {HTMLElement} root - The root element
+ * @param {Range} range
+ * @return {Promise<Selector[]>}
+ */
+export async function describe(root, range) {
+  const [textRange, textLayer] = getTextLayerForRange(range);
+
   const startPos = TextPosition.fromPoint(
-    range.startContainer,
-    range.startOffset
-  ).relativeTo(startTextLayer);
+    textRange.startContainer,
+    textRange.startOffset
+  ).relativeTo(textLayer);
 
   const endPos = TextPosition.fromPoint(
-    range.endContainer,
-    range.endOffset
-  ).relativeTo(endTextLayer);
+    textRange.endContainer,
+    textRange.endOffset
+  ).relativeTo(textLayer);
 
   const startPageIndex = getSiblingIndex(
-    /** @type {Node} */ (startTextLayer.parentNode)
+    /** @type {Node} */ (textLayer.parentNode)
   );
   const pageOffset = await getPageOffset(startPageIndex);
 
@@ -537,7 +678,7 @@ export async function describe(root, range) {
     end: pageOffset + endPos.offset,
   };
 
-  const quote = TextQuoteAnchor.fromRange(root, range).toSelector();
+  const quote = TextQuoteAnchor.fromRange(root, textRange).toSelector();
 
   return [position, quote];
 }
@@ -548,6 +689,6 @@ export async function describe(root, range) {
  * This exists mainly as a helper for use in tests.
  */
 export function purgeCache() {
-  pageTextCache = {};
-  quotePositionCache = {};
+  pageTextCache.clear();
+  quotePositionCache.clear();
 }

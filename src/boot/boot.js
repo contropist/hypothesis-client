@@ -1,20 +1,22 @@
 import { requiredPolyfillSets } from './polyfills';
 
+/** @typedef {import('./polyfills').PolyfillSet} PolyfillSet */
+
 /**
  * Polyfills used by both the annotator and sidebar app.
  */
-const commonPolyfills = [
+const commonPolyfills = /** @type {PolyfillSet[]} */ ([
   // ES APIs
   'es2017',
   'es2018',
 
   // Any other polyfills which may rely on certain ES APIs should be listed here.
-];
+]);
 
 /**
  * @typedef SidebarAppConfig
  * @prop {string} assetRoot - The root URL to which URLs in `manifest` are relative
- * @prop {Object.<string,string>} manifest -
+ * @prop {Record<string,string>} manifest -
  *   A mapping from canonical asset path to cache-busted asset path
  * @prop {string} apiUrl
  */
@@ -24,8 +26,12 @@ const commonPolyfills = [
  * @prop {string} assetRoot - The root URL to which URLs in `manifest` are relative
  * @prop {string} notebookAppUrl - The URL of the sidebar's notebook
  * @prop {string} sidebarAppUrl - The URL of the sidebar's HTML page
- * @prop {Object.<string,string>} manifest -
+ * @prop {Record<string,string>} manifest -
  *   A mapping from canonical asset path to cache-busted asset path
+ */
+
+/**
+ * @typedef {Window & { PDFViewerApplication?: object }} MaybePDFWindow
  */
 
 /**
@@ -57,10 +63,26 @@ function injectStylesheet(doc, href) {
 /**
  * @param {Document} doc
  * @param {string} src - The script URL
+ * @param {object} options
+ *   @param {boolean} [options.esModule] - Whether to load the script as an ES module
+ *   @param {boolean} [options.forceReload] - Whether to force re-evaluation of an ES module script
  */
-function injectScript(doc, src) {
+function injectScript(doc, src, { esModule = true, forceReload = false } = {}) {
   const script = doc.createElement('script');
-  script.type = 'text/javascript';
+
+  if (esModule) {
+    script.type = 'module';
+  }
+
+  if (forceReload) {
+    // Module scripts are only evaluated once per URL in a document. Adding
+    // a dynamic fragment forces re-evaluation without breaking browser or CDN
+    // caching of the script, as a query string would do.
+    //
+    // See examples in https://html.spec.whatwg.org/multipage/webappapis.html#integration-with-the-javascript-module-system
+    src += `#ts=${Date.now()}`;
+  }
+
   script.src = src;
 
   // Set 'async' to false to maintain execution order of scripts.
@@ -97,33 +119,32 @@ function injectLink(doc, rel, type, url) {
  * @param {string} type - Type of resource
  * @param {string} url
  */
-function preloadUrl(doc, type, url) {
+function preloadURL(doc, type, url) {
   const link = doc.createElement('link');
   link.rel = 'preload';
   link.as = type;
-  link.crossOrigin = 'anonymous';
   link.href = url;
+
+  // If this is a resource that we are going to read the contents of, then we
+  // need to make a cross-origin request. For other types, use a non cross-origin
+  // request which returns a response that is opaque.
+  if (type === 'fetch') {
+    link.crossOrigin = 'anonymous';
+  }
 
   tagElement(link);
   doc.head.appendChild(link);
 }
 
 /**
- * @param {Document} doc
  * @param {SidebarAppConfig|AnnotatorConfig} config
- * @param {string[]} assets
+ * @param {string} path
  */
-function injectAssets(doc, config, assets) {
-  assets.forEach(function (path) {
-    const url = config.assetRoot + 'build/' + config.manifest[path];
-    if (url.match(/\.css/)) {
-      injectStylesheet(doc, url);
-    } else {
-      injectScript(doc, url);
-    }
-  });
+function assetURL(config, path) {
+  return config.assetRoot + 'build/' + config.manifest[path];
 }
 
+/** @param {PolyfillSet[]} needed */
 function polyfillBundles(needed) {
   return requiredPolyfillSets(needed).map(
     set => `scripts/polyfills-${set}.bundle.js`
@@ -155,6 +176,9 @@ export function bootHypothesisClient(doc, config) {
   // Register the URL of the notebook app which the Hypothesis client should load.
   injectLink(doc, 'notebook', 'html', config.notebookAppUrl);
 
+  // Preload the styles used by the shadow roots of annotator UI elements.
+  preloadURL(doc, 'style', assetURL(config, 'styles/annotator.css'));
+
   // Register the URL of the annotation client which is currently being used to drive
   // annotation interactions.
   injectLink(
@@ -165,17 +189,23 @@ export function bootHypothesisClient(doc, config) {
   );
 
   const polyfills = polyfillBundles(commonPolyfills);
+  const scripts = [...polyfills, 'scripts/annotator.bundle.js'];
+  for (let path of scripts) {
+    const url = assetURL(config, path);
+    injectScript(doc, url, { esModule: false });
+  }
 
-  injectAssets(doc, config, [
-    // Vendor code and polyfills
-    ...polyfills,
-
-    // Main entry point for the client
-    'scripts/annotator.bundle.js',
-
-    'styles/annotator.css',
-    'styles/pdfjs-overrides.css',
-  ]);
+  const styles = [];
+  if (
+    /** @type {MaybePDFWindow} */ (window).PDFViewerApplication !== undefined
+  ) {
+    styles.push('styles/pdfjs-overrides.css');
+  }
+  styles.push('styles/highlights.css');
+  for (let path of styles) {
+    const url = assetURL(config, path);
+    injectStylesheet(doc, url);
+  }
 }
 
 /**
@@ -186,23 +216,20 @@ export function bootHypothesisClient(doc, config) {
  */
 export function bootSidebarApp(doc, config) {
   // Preload `/api/` and `/api/links` API responses.
-  preloadUrl(doc, 'fetch', config.apiUrl);
-  preloadUrl(doc, 'fetch', config.apiUrl + 'links');
+  preloadURL(doc, 'fetch', config.apiUrl);
+  preloadURL(doc, 'fetch', config.apiUrl + 'links');
 
   const polyfills = polyfillBundles(commonPolyfills);
 
-  injectAssets(doc, config, [
-    ...polyfills,
+  const scripts = [...polyfills, 'scripts/sidebar.bundle.js'];
+  for (let path of scripts) {
+    const url = assetURL(config, path);
+    injectScript(doc, url, { esModule: true });
+  }
 
-    // Vendor code required by sidebar.bundle.js
-    'scripts/sentry.bundle.js',
-    'scripts/katex.bundle.js',
-    'scripts/showdown.bundle.js',
-
-    // The sidebar app
-    'scripts/sidebar.bundle.js',
-
-    'styles/katex.min.css',
-    'styles/sidebar.css',
-  ]);
+  const styles = ['styles/katex.min.css', 'styles/sidebar.css'];
+  for (let path of styles) {
+    const url = assetURL(config, path);
+    injectStylesheet(doc, url);
+  }
 }

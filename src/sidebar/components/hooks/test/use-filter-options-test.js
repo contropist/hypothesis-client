@@ -1,7 +1,6 @@
 import { mount } from 'enzyme';
 
-import { useUserFilterOptions } from '../use-filter-options';
-import { $imports } from '../use-filter-options';
+import { useUserFilterOptions, $imports } from '../use-filter-options';
 
 describe('sidebar/components/hooks/use-user-filter-options', () => {
   let fakeAccountId;
@@ -52,16 +51,14 @@ describe('sidebar/components/hooks/use-user-filter-options', () => {
 
     fakeStore = {
       allAnnotations: sinon.stub().returns([]),
-      defaultAuthority: sinon.stub().returns('foo.com'),
       getFocusFilters: sinon.stub().returns({}),
-      isFeatureEnabled: sinon.stub().returns(false),
       profile: sinon.stub().returns({}),
     };
 
     $imports.$mock({
       '../../helpers/account-id': fakeAccountId,
       '../../helpers/annotation-user': fakeAnnotationUser,
-      '../../store/use-store': { useStoreProxy: () => fakeStore },
+      '../../store': { useSidebarStore: () => fakeStore },
     });
   });
 

@@ -1,13 +1,15 @@
 import {
-  SvgIcon,
   normalizeKeyName,
   useElementShouldClose,
+  TextInput,
 } from '@hypothesis/frontend-shared';
 import { useRef, useState } from 'preact/hooks';
 
 import { withServices } from '../service-context';
 
 import AutocompleteList from './AutocompleteList';
+import TagList from './TagList';
+import TagListItem from './TagListItem';
 
 /** @typedef {import("preact").JSX.Element} JSXElement */
 
@@ -18,7 +20,7 @@ let tagEditorIdCounter = 0;
  * @typedef TagEditorProps
  * @prop {(tag: string) => boolean} onAddTag - Callback to add a tag to the annotation
  * @prop {(tag: string) => boolean} onRemoveTag - Callback to remove a tag from the annotation
- * @prop {(tag: string) => any} onTagInput - Callback when inputted tag text changes
+ * @prop {(tag: string) => void} onTagInput - Callback when inputted tag text changes
  * @prop {string[]} tagList - The list of tags for the annotation under edit
  * @prop {import('../services/tags').TagsService} tags
  */
@@ -38,7 +40,7 @@ function TagEditor({
   tagList,
   tags: tagsService,
 }) {
-  const inputEl = useRef(/** @type {HTMLInputElement|null} */ (null));
+  const inputEl = /** @type {{ current: HTMLInputElement }} */ (useRef());
   const [suggestions, setSuggestions] = useState(/** @type {string[]} */ ([]));
   const [activeItem, setActiveItem] = useState(-1); // -1 is unselected
   const [suggestionsListOpen, setSuggestionsListOpen] = useState(false);
@@ -48,7 +50,7 @@ function TagEditor({
   });
 
   // Set up callback to monitor outside click events to close the AutocompleteList
-  const closeWrapperRef = useRef(/** @type {HTMLElement|null} */ (null));
+  const closeWrapperRef = /** @type {{ current: HTMLDivElement }} */ (useRef());
   useElementShouldClose(closeWrapperRef, suggestionsListOpen, () => {
     setSuggestionsListOpen(false);
   });
@@ -73,11 +75,11 @@ function TagEditor({
    */
   const removeDuplicates = (suggestions, duplicates) => {
     const suggestionsSet = [];
-    suggestions.forEach(suggestion => {
+    for (let suggestion of suggestions) {
       if (duplicates.indexOf(suggestion) < 0) {
         suggestionsSet.push(suggestion);
       }
-    });
+    }
     return suggestionsSet.sort();
   };
 
@@ -269,38 +271,15 @@ function TagEditor({
     activeItem >= 0 ? `${tagEditorId}-AutocompleteList-item-${activeItem}` : '';
 
   return (
-    <div className="TagEditor">
-      <ul
-        className="TagEditor__tags"
-        aria-label="Suggested tags for annotation"
-      >
+    <div className="space-y-4">
+      <TagList>
         {tagList.map(tag => {
-          return (
-            <li
-              key={`${tag}`}
-              className="TagEditor__item"
-              aria-label={`Tag: ${tag}`}
-            >
-              <span lang="" className="TagEditor__edit">
-                {tag}
-              </span>
-              <button
-                onClick={() => {
-                  onRemoveTag(tag);
-                }}
-                aria-label={`Remove Tag: ${tag}`}
-                title={`Remove Tag: ${tag}`}
-                className="TagEditor__delete"
-              >
-                <SvgIcon name="cancel" />
-              </button>
-            </li>
-          );
+          return <TagListItem key={tag} onRemoveTag={onRemoveTag} tag={tag} />;
         })}
-      </ul>
-      <span
+      </TagList>
+      <div
         id={tagEditorId}
-        className="TagEditor__combobox-wrapper"
+        data-testid="combobox-container"
         ref={closeWrapperRef}
         // Disabled because aria-controls must be attached to the <input> field
         // eslint-disable-next-line jsx-a11y/role-has-required-aria-props
@@ -309,16 +288,15 @@ function TagEditor({
         aria-owns={`${tagEditorId}-AutocompleteList`}
         aria-haspopup="listbox"
       >
-        <input
+        <TextInput
+          classes="w-full"
           onInput={handleOnInput}
           onKeyDown={handleKeyDown}
           onFocus={handleFocus}
-          ref={inputEl}
+          inputRef={inputEl}
           placeholder="Add new tags"
-          className="TagEditor__input"
           type="text"
           autoComplete="off"
-          aria-label="Add tag field"
           aria-autocomplete="list"
           aria-activedescendant={activeDescendant}
           aria-controls={`${tagEditorId}-AutocompleteList`}
@@ -333,11 +311,9 @@ function TagEditor({
           itemPrefixId={`${tagEditorId}-AutocompleteList-item-`}
           activeItem={activeItem}
         />
-      </span>
+      </div>
     </div>
   );
 }
 
-TagEditor.injectedProps = ['tags'];
-
-export default withServices(TagEditor);
+export default withServices(TagEditor, ['tags']);

@@ -1,63 +1,56 @@
-import * as queryString from 'query-string';
+import { generateHexString } from '../../shared/random';
+import { fetchJSON } from './fetch';
 
-import * as random from './random';
+/**
+ * OAuth access token response.
+ *
+ * See https://datatracker.ietf.org/doc/html/rfc6749#section-5.1
+ *
+ * @typedef AccessTokenResponse
+ * @prop {string} access_token
+ * @prop {number} expires_in
+ * @prop {string} refresh_token
+ */
 
 /**
  * An object holding the details of an access token from the tokenUrl endpoint.
- * @typedef {Object} TokenInfo
- * @property {string} accessToken  - The access token itself.
- * @property {number} expiresAt    - The date when the timestamp will expire.
- * @property {string} refreshToken - The refresh token that can be used to
- *                                   get a new access token.
- */
-
-/**
- * Return a new TokenInfo object from the given tokenUrl endpoint response.
- * @param {Response} response - The HTTP response from a POST to the tokenUrl
- *                            endpoint.
- * @returns {Promise<TokenInfo>}
- */
-function tokenInfoFrom(response) {
-  return response.json().then(data => {
-    return {
-      accessToken: data.access_token,
-
-      // Set the expiry date to some time slightly before that implied by
-      // `expires_in` to account for the delay in the client receiving the
-      // response.
-      expiresAt: Date.now() + (data.expires_in - 10) * 1000,
-
-      refreshToken: data.refresh_token,
-    };
-  });
-}
-
-/**
- * Generate a short random string suitable for use as the "state" param in
- * authorization requests.
  *
- * See https://tools.ietf.org/html/rfc6749#section-4.1.1.
+ * @typedef TokenInfo
+ * @prop {string} accessToken  - The access token itself.
+ * @prop {number} expiresAt    - The date when the timestamp will expire.
+ * @prop {string} refreshToken - The refresh token that can be used to
+ *                               get a new access token.
  */
-function generateState() {
-  return random.generateHexString(16);
+
+/**
+ * Error thrown if fetching or revoking an access token fails.
+ */
+export class TokenError extends Error {
+  /**
+   * @param {string} message
+   * @param {Error} cause - The error which caused the token fetch to fail
+   */
+  constructor(message, cause) {
+    super(message);
+    this.cause = cause;
+  }
 }
 
 /**
  * OAuthClient configuration.
  *
- * @typedef {Object} Config
- * @property {string} clientId - OAuth client ID
- * @property {string} tokenEndpoint - OAuth token exchange/refresh endpoint
- * @property {string} authorizationEndpoint - OAuth authorization endpoint
- * @property {string} revokeEndpoint - RFC 7009 token revocation endpoint
- * @property {() => string} [generateState] - Authorization "state" parameter generator
+ * @typedef Config
+ * @prop {string} clientId - OAuth client ID
+ * @prop {string} tokenEndpoint - OAuth token exchange/refresh endpoint
+ * @prop {string} authorizationEndpoint - OAuth authorization endpoint
+ * @prop {string} revokeEndpoint - RFC 7009 token revocation endpoint
  */
 
 /**
  * OAuthClient handles interaction with the annotation service's OAuth
  * endpoints.
  */
-export default class OAuthClient {
+export class OAuthClient {
   /**
    * Create a new OAuthClient
    *
@@ -68,9 +61,6 @@ export default class OAuthClient {
     this.tokenEndpoint = config.tokenEndpoint;
     this.authorizationEndpoint = config.authorizationEndpoint;
     this.revokeEndpoint = config.revokeEndpoint;
-
-    // Test seam
-    this.generateState = config.generateState || generateState;
   }
 
   /**
@@ -80,16 +70,10 @@ export default class OAuthClient {
    * @return {Promise<TokenInfo>}
    */
   exchangeAuthCode(code) {
-    const data = {
+    return this._getAccessToken({
       client_id: this.clientId,
       grant_type: 'authorization_code',
       code,
-    };
-    return this._formPost(this.tokenEndpoint, data).then(response => {
-      if (response.status !== 200) {
-        throw new Error('Authorization code exchange failed');
-      }
-      return tokenInfoFrom(response);
     });
   }
 
@@ -102,15 +86,9 @@ export default class OAuthClient {
    * @return {Promise<TokenInfo>}
    */
   exchangeGrantToken(token) {
-    const data = {
+    return this._getAccessToken({
       grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
       assertion: token,
-    };
-    return this._formPost(this.tokenEndpoint, data).then(response => {
-      if (response.status !== 200) {
-        throw new Error('Failed to retrieve access token');
-      }
-      return tokenInfoFrom(response);
     });
   }
 
@@ -123,12 +101,9 @@ export default class OAuthClient {
    * @return {Promise<TokenInfo>}
    */
   refreshToken(refreshToken) {
-    const data = { grant_type: 'refresh_token', refresh_token: refreshToken };
-    return this._formPost(this.tokenEndpoint, data).then(response => {
-      if (response.status !== 200) {
-        throw new Error('Failed to refresh access token');
-      }
-      return tokenInfoFrom(response);
+    return this._getAccessToken({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
     });
   }
 
@@ -136,10 +111,14 @@ export default class OAuthClient {
    * Revoke an access and refresh token pair.
    *
    * @param {string} accessToken
-   * @return {Promise}
+   * @return {Promise<void>}
    */
-  revokeToken(accessToken) {
-    return this._formPost(this.revokeEndpoint, { token: accessToken });
+  async revokeToken(accessToken) {
+    try {
+      await this._formPost(this.revokeEndpoint, { token: accessToken });
+    } catch (err) {
+      throw new TokenError('Failed to revoke access token', err);
+    }
   }
 
   /**
@@ -148,18 +127,19 @@ export default class OAuthClient {
    * Returns an authorization code which can be passed to `exchangeAuthCode`.
    *
    * @param {Window} $window - Window which will receive the auth response.
-   * @param {Window} authWindow - Popup window where the login prompt will be shown.
-   *   This should be created using `openAuthPopupWindow`.
    * @return {Promise<string>}
    */
-  authorize($window, authWindow) {
+  authorize($window) {
     // Random state string used to check that auth messages came from the popup
     // window that we opened.
-    const state = this.generateState();
+    //
+    // See https://tools.ietf.org/html/rfc6749#section-4.1.1.
+    const state = generateHexString(16);
 
     // Promise which resolves or rejects when the user accepts or closes the
     // auth popup.
     const authResponse = new Promise((resolve, reject) => {
+      /** @param {MessageEvent} event */
       function authRespListener(event) {
         if (typeof event.data !== 'object') {
           return;
@@ -182,57 +162,13 @@ export default class OAuthClient {
     });
 
     // Authorize user and retrieve grant token
-    let authUrl = this.authorizationEndpoint;
-    authUrl +=
-      '?' +
-      queryString.stringify({
-        client_id: this.clientId,
-        origin: $window.location.origin,
-        response_mode: 'web_message',
-        response_type: 'code',
-        state: state,
-      });
+    const authURL = new URL(this.authorizationEndpoint);
+    authURL.searchParams.set('client_id', this.clientId);
+    authURL.searchParams.set('origin', $window.location.origin);
+    authURL.searchParams.set('response_mode', 'web_message');
+    authURL.searchParams.set('response_type', 'code');
+    authURL.searchParams.set('state', state);
 
-    // @ts-ignore - TS doesn't know about `location = <string>`.
-    authWindow.location = authUrl;
-
-    return authResponse.then(rsp => rsp.code);
-  }
-
-  /**
-   * Make an `application/x-www-form-urlencoded` POST request.
-   *
-   * @param {string} url
-   * @param {Object} data - Parameter dictionary
-   */
-  _formPost(url, data) {
-    // The `fetch` API has native support for sending form data by setting
-    // the `body` option to a `FormData` instance. We are not using that here
-    // because our test environment has very limited `FormData` support and it
-    // is simpler just to format the data manually.
-    const formData = queryString.stringify(data);
-    const headers = {
-      'Content-Type': 'application/x-www-form-urlencoded',
-    };
-    return fetch(url, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
-  }
-
-  /**
-   * Create and show a pop-up window for use with `OAuthClient#authorize`.
-   *
-   * This function _must_ be called in the same turn of the event loop as the
-   * button or link which initiates login to avoid triggering the popup blocker
-   * in certain browsers. See https://github.com/hypothesis/client/issues/534
-   * and https://github.com/hypothesis/client/issues/535.
-   *
-   * @param {Window} $window - The parent of the created window.
-   * @return {Window} The new popup window.
-   */
-  static openAuthPopupWindow($window) {
     // In Chrome & Firefox the sizes passed to `window.open` are used for the
     // viewport size. In Safari the size is used for the window size including
     // title bar etc. There is enough vertical space at the bottom to allow for
@@ -246,17 +182,9 @@ export default class OAuthClient {
 
     // Generate settings for `window.open` in the required comma-separated
     // key=value format.
-    const authWindowSettings = queryString
-      .stringify({
-        left: left,
-        top: top,
-        width: width,
-        height: height,
-      })
-      .replace(/&/g, ',');
-
+    const authWindowSettings = `left=${left},top=${top},width=${width},height=${height}`;
     const authWindow = $window.open(
-      'about:blank',
+      authURL.toString(),
       'Log in to Hypothesis',
       authWindowSettings
     );
@@ -265,6 +193,61 @@ export default class OAuthClient {
       throw new Error('Failed to open login window');
     }
 
-    return authWindow;
+    return authResponse.then(rsp => rsp.code);
+  }
+
+  /**
+   * Make an `application/x-www-form-urlencoded` POST request.
+   *
+   * @param {string} url
+   * @param {Record<string, string>} data - Parameter dictionary
+   */
+  async _formPost(url, data) {
+    const params = new URLSearchParams();
+    for (let [key, value] of Object.entries(data)) {
+      params.set(key, value);
+    }
+
+    // Tests currently expect sorted parameters.
+    params.sort();
+
+    const headers = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    };
+    return fetchJSON(url, {
+      method: 'POST',
+      headers,
+      body: params.toString(),
+    });
+  }
+
+  /**
+   * Fetch an OAuth access token.
+   *
+   * See https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.3
+   *
+   * @param {Record<string, string>} data - Parameters for form POST request
+   * @return {Promise<TokenInfo>}
+   */
+  async _getAccessToken(data) {
+    let response;
+    try {
+      response = /** @type {AccessTokenResponse} */ (
+        await this._formPost(this.tokenEndpoint, data)
+      );
+    } catch (err) {
+      throw new TokenError('Failed to fetch access token', err);
+    }
+
+    return {
+      accessToken: response.access_token,
+
+      // Set the expiry date to some time slightly before that implied by
+      // `expires_in` to account for the delay in the client receiving the
+      // response.
+      expiresAt: Date.now() + (response.expires_in - 10) * 1000,
+
+      refreshToken: response.refresh_token,
+    };
   }
 }

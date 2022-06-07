@@ -2,9 +2,7 @@ import { mount } from 'enzyme';
 import { act } from 'preact/test-utils';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
-
-import mockImportedComponents from '../../../test-util/mock-imported-components';
-
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 import { ResultSizeError } from '../../search-client';
 import NotebookView, { $imports } from '../NotebookView';
 
@@ -44,8 +42,8 @@ describe('NotebookView', () => {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      './hooks/use-root-thread': fakeUseRootThread,
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      './hooks/use-root-thread': { useRootThread: fakeUseRootThread },
+      '../store': { useSidebarStore: () => fakeStore },
       'scroll-into-view': fakeScrollIntoView,
     });
   });
@@ -116,7 +114,7 @@ describe('NotebookView', () => {
     fakeStore.focusedGroup.returns({ id: 'hallothere', name: 'Hallo' });
     const wrapper = createComponent();
 
-    const message = wrapper.find('.NotebookView__messages');
+    const message = wrapper.find('[data-testid="notebook-messages"]');
     assert.include(message.text(), 'up to 5000 results at a time');
     assert.isTrue(message.exists());
   });
@@ -125,14 +123,20 @@ describe('NotebookView', () => {
     fakeStore.focusedGroup.returns({ id: 'hallothere', name: 'Hallo' });
     const wrapper = createComponent();
 
-    assert.equal(wrapper.find('.NotebookView__heading').text(), 'Hallo');
+    assert.equal(
+      wrapper.find('[data-testid="notebook-group-name"]').text(),
+      'Hallo'
+    );
   });
 
   it('renders a placeholder if group name missing', () => {
     fakeStore.focusedGroup.returns({ id: 'hallothere' });
     const wrapper = createComponent();
 
-    assert.equal(wrapper.find('.NotebookView__heading').text(), '…');
+    assert.equal(
+      wrapper.find('[data-testid="notebook-group-name"]').text(),
+      '…'
+    );
   });
 
   it('renders results (counts)', () => {

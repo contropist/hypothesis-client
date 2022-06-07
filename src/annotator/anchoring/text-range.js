@@ -41,10 +41,9 @@ function previousSiblingsTextLength(node) {
  */
 function resolveOffsets(element, ...offsets) {
   let nextOffset = offsets.shift();
-  const nodeIter = /** @type {Document} */ (element.ownerDocument).createNodeIterator(
-    element,
-    NodeFilter.SHOW_TEXT
-  );
+  const nodeIter = /** @type {Document} */ (
+    element.ownerDocument
+  ).createNodeIterator(element, NodeFilter.SHOW_TEXT);
   const results = [];
 
   let currentNode = nodeIter.nextNode();
@@ -138,7 +137,7 @@ export class TextPosition {
    * Offsets at the boundary between two nodes are resolved to the start of the
    * node that begins at the boundary.
    *
-   * @param {Object} [options]
+   * @param {object} [options]
    *   @param {RESOLVE_FORWARDS|RESOLVE_BACKWARDS} [options.direction] -
    *     Specifies in which direction to search for the nearest text node if
    *     `this.offset` is `0` and `this.element` has no text. If not specified
@@ -157,9 +156,9 @@ export class TextPosition {
         );
         tw.currentNode = this.element;
         const forwards = options.direction === RESOLVE_FORWARDS;
-        const text = /** @type {Text|null} */ (forwards
-          ? tw.nextNode()
-          : tw.previousNode());
+        const text = /** @type {Text|null} */ (
+          forwards ? tw.nextNode() : tw.previousNode()
+        );
         if (!text) {
           throw err;
         }

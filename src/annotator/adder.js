@@ -31,6 +31,7 @@ export const ARROW_POINTING_UP = 2;
  * @prop {ArrowDirection} arrowDirection - Direction of the adder's arrow.
  */
 
+/** @param {number} pixels */
 function toPx(pixels) {
   return pixels.toString() + 'px';
 }
@@ -62,10 +63,12 @@ function nearestPositionedAncestor(el) {
 
 /**
  * @typedef AdderOptions
- * @prop {() => any} onAnnotate - Callback invoked when "Annotate" button is clicked
- * @prop {() => any} onHighlight - Callback invoked when "Highlight" button is clicked
- * @prop {(annotations: Object[]) => any} onShowAnnotations -
+ * @prop {() => void} onAnnotate - Callback invoked when "Annotate" button is clicked
+ * @prop {() => void} onHighlight - Callback invoked when "Highlight" button is clicked
+ * @prop {(tags: string[]) => void} onShowAnnotations -
  *   Callback invoked when  "Show" button is clicked
+ *
+ * @typedef {import('../types/annotator').Destroyable} Destroyable
  */
 
 /**
@@ -76,6 +79,8 @@ function nearestPositionedAncestor(el) {
  * the container for the toolbar that positions it on the page and isolates
  * it from the page's styles using shadow DOM, and the `AdderToolbar` Preact
  * component which actually renders the toolbar.
+ *
+ * @implements {Destroyable}
  */
 export class Adder {
   /**
@@ -122,11 +127,11 @@ export class Adder {
     this._onShowAnnotations = options.onShowAnnotations;
 
     /**
-     * Annotation objects associated with the current selection. If non-empty,
+     * Annotation tags associated with the current selection. If non-empty,
      * a "Show" button appears in the toolbar. Clicking the button calls the
      * `onShowAnnotations` callback with the current value of `annotationsForSelection`.
      *
-     * @type {Object[]}
+     * @type {string[]}
      */
     this.annotationsForSelection = [];
 
@@ -321,6 +326,7 @@ export class Adder {
   }
 
   _render() {
+    /** @param {import('./components/AdderToolbar').Command} command */
     const handleCommand = command => {
       switch (command) {
         case 'annotate':
@@ -333,6 +339,9 @@ export class Adder {
           break;
         case 'show':
           this._onShowAnnotations(this.annotationsForSelection);
+          break;
+        case 'hide':
+          this.hide();
           break;
         default:
           break;

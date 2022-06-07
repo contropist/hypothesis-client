@@ -3,7 +3,7 @@ import { mount } from 'enzyme';
 import VersionInfo from '../VersionInfo';
 import { $imports } from '../VersionInfo';
 
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 import { checkAccessibility } from '../../../test-util/accessibility';
 
 describe('VersionInfo', () => {
@@ -40,7 +40,7 @@ describe('VersionInfo', () => {
     fakeVersionData = {
       version: 'fakeVersion',
       userAgent: 'fakeUserAgent',
-      url: 'fakeUrl',
+      urls: 'fakeUrl',
       fingerprint: 'fakeFingerprint',
       account: 'fakeAccount',
       timestamp: 'fakeTimestamp',

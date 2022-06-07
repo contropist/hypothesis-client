@@ -2,7 +2,11 @@ import { normalizeKeyName } from '@hypothesis/frontend-shared';
 
 import { useEffect } from 'preact/hooks';
 
-// Bit flags indicating modifiers required by a shortcut or pressed in a key event.
+/**
+ * Bit flags indicating modifiers required by a shortcut or pressed in a key event.
+ *
+ * @type {Record<string, number>}
+ */
 const modifiers = {
   alt: 1,
   ctrl: 2,
@@ -69,15 +73,22 @@ export function matchShortcut(event, shortcut) {
  * component, you probably want the `useShortcut` hook.
  *
  * @param {string} shortcut - Shortcut key sequence. See `matchShortcut`.
- * @param {(e: KeyboardEvent) => any} onPress - A function to call when the shortcut matches
+ * @param {(e: KeyboardEvent) => void} onPress - A function to call when the shortcut matches
  * @param {ShortcutOptions} [options]
  * @return {() => void} A function that removes the shortcut
  */
 export function installShortcut(
   shortcut,
   onPress,
-  { rootElement = document.body } = {}
+  {
+    // We use `documentElement` as the root element rather than `document.body`
+    // which is used as a root element in some other places because the body
+    // element is not keyboard-focusable in XHTML documents in Safari/Chrome.
+    // See https://github.com/hypothesis/client/issues/4364.
+    rootElement = document.documentElement,
+  } = {}
 ) {
+  /** @param {KeyboardEvent} event */
   const onKeydown = event => {
     if (matchShortcut(event, shortcut)) {
       onPress(event);
@@ -100,14 +111,10 @@ export function installShortcut(
  *
  * @param {string|null} shortcut -
  *   A shortcut key sequence to match or `null` to disable. See `matchShortcut`.
- * @param {(e: KeyboardEvent) => any} onPress - A function to call when the shortcut matches
+ * @param {(e: KeyboardEvent) => void} onPress - A function to call when the shortcut matches
  * @param {ShortcutOptions} [options]
  */
-export function useShortcut(
-  shortcut,
-  onPress,
-  { rootElement = document.body } = {}
-) {
+export function useShortcut(shortcut, onPress, { rootElement } = {}) {
   useEffect(() => {
     if (!shortcut) {
       return undefined;

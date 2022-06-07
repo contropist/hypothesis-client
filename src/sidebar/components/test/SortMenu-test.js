@@ -3,7 +3,7 @@ import { mount } from 'enzyme';
 import SortMenu from '../SortMenu';
 import { $imports } from '../SortMenu';
 
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
 describe('SortMenu', () => {
   let fakeStore;
@@ -21,7 +21,7 @@ describe('SortMenu', () => {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      '../store': { useSidebarStore: () => fakeStore },
     });
   });
 

@@ -18,6 +18,7 @@ jobs:
     - name: Lint
       run: yarn lint
     - name: Typecheck
-      run: yarn typecheck
+      run: |
+        yarn typecheck
     - name: Test
       run: yarn test

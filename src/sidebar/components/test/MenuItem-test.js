@@ -1,11 +1,10 @@
 import { mount } from 'enzyme';
 import { act } from 'preact/test-utils';
 
-import MenuItem from '../MenuItem';
-import { $imports } from '../MenuItem';
+import MenuItem, { $imports } from '../MenuItem';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
 describe('MenuItem', () => {
   let containers = [];
@@ -17,6 +16,8 @@ describe('MenuItem', () => {
       attachTo: newContainer,
     });
   };
+
+  const menuItemSelector = '[data-testid="menu-item"]';
 
   beforeEach(() => {
     $imports.$mock(mockImportedComponents());
@@ -49,9 +50,9 @@ describe('MenuItem', () => {
     it('invokes `onClick` callback when pressing `Enter` or space', () => {
       const onClick = sinon.stub();
       const wrapper = createMenuItem({ href: 'https://example.com', onClick });
-      wrapper.find('.MenuItem').simulate('keydown', { key: 'Enter' });
+      wrapper.find(menuItemSelector).simulate('keydown', { key: 'Enter' });
       assert.called(onClick);
-      wrapper.find('.MenuItem').simulate('keydown', { key: ' ' });
+      wrapper.find(menuItemSelector).simulate('keydown', { key: ' ' });
       assert.calledTwice(onClick);
     });
   });
@@ -60,60 +61,66 @@ describe('MenuItem', () => {
     it('renders a non-link if an `href` is not provided', () => {
       const wrapper = createMenuItem();
       assert.isFalse(wrapper.exists('a'));
-      assert.equal(wrapper.find('.MenuItem__label').text(), 'Test item');
+      assert.equal(wrapper.find(menuItemSelector).text(), 'Test item');
     });
 
     it('invokes `onClick` callback when clicked', () => {
       const onClick = sinon.stub();
       const wrapper = createMenuItem({ onClick });
-      wrapper.find('.MenuItem').simulate('click');
+      wrapper.find(menuItemSelector).simulate('click');
       assert.called(onClick);
     });
 
     it('invokes `onClick` callback when pressing `Enter` or space', () => {
       const onClick = sinon.stub();
       const wrapper = createMenuItem({ isSelected: true, onClick });
-      wrapper.find('.MenuItem').simulate('keydown', { key: 'Enter' });
+      wrapper.find(menuItemSelector).simulate('keydown', { key: 'Enter' });
       assert.called(onClick);
-      wrapper.find('.MenuItem').simulate('keydown', { key: ' ' });
+      wrapper.find(menuItemSelector).simulate('keydown', { key: ' ' });
       assert.calledTwice(onClick);
     });
 
     it('has proper aria attributes when `isSelected` is a boolean', () => {
       const wrapper = createMenuItem({ isSelected: true });
-      assert.equal(wrapper.find('.MenuItem').prop('role'), 'menuitemradio');
-      assert.equal(wrapper.find('.MenuItem').prop('aria-checked'), true);
+      assert.equal(
+        wrapper.find(menuItemSelector).prop('role'),
+        'menuitemradio'
+      );
+      assert.equal(wrapper.find(menuItemSelector).prop('aria-checked'), true);
       // aria-haspopup should be false without a submenu
-      assert.equal(wrapper.find('.MenuItem').prop('aria-haspopup'), false);
+      assert.equal(wrapper.find(menuItemSelector).prop('aria-haspopup'), false);
     });
   });
 
-  describe('icons', () => {
-    it('renders an SVG icon if an icon name is provided', () => {
-      const wrapper = createMenuItem({ icon: 'an-svg-icon' });
-      assert.isTrue(wrapper.exists('SvgIcon[name="an-svg-icon"]'));
+  describe('icons for top-level menu items', () => {
+    it('renders an icon if an icon name is provided', () => {
+      const wrapper = createMenuItem({ icon: 'edit' });
+      assert.isTrue(wrapper.exists('Icon[name="edit"]'));
     });
 
-    it('renders a blank space for an icon if `icon` is "blank"', () => {
+    it('adds a left container if `icon` is "blank"', () => {
       const wrapper = createMenuItem({ icon: 'blank' });
-      const iconSpace = wrapper.find('.MenuItem__icon-container');
-      assert.equal(iconSpace.length, 1);
-      assert.equal(iconSpace.children().length, 0);
+      assert.equal(
+        wrapper.find('[data-testid="left-item-container"]').length,
+        1
+      );
     });
 
-    it('does not render a space for an icon if `icon` is missing', () => {
+    it('does not add a left container if `icon` is missing', () => {
       const wrapper = createMenuItem();
-      const iconSpace = wrapper.find('.MenuItem__icon-container');
-      assert.equal(iconSpace.length, 0);
+      assert.equal(
+        wrapper.find('[data-testid="left-item-container"]').length,
+        0
+      );
     });
 
-    it('renders top-level menu item icons on the left', () => {
-      const wrapper = createMenuItem({ icon: 'an-svg-icon' });
-      const iconSpaces = wrapper.find('.MenuItem__icon-container');
+    it('renders an icon on the left if `icon` provided', () => {
+      const wrapper = createMenuItem({ icon: 'edit' });
+      const leftItem = wrapper.find('[data-testid="left-item-container"]');
 
       // There should be only one icon space, on the left.
-      assert.equal(iconSpaces.length, 1);
-      assert.equal(iconSpaces.at(0).children().length, 1);
+      assert.equal(leftItem.length, 1);
+      assert.equal(leftItem.at(0).children().length, 1);
     });
   });
 
@@ -123,21 +130,24 @@ describe('MenuItem', () => {
         isSubmenuVisible: true,
         submenu: <div role="menuitem">Submenu content</div>,
       });
-      assert.isTrue(wrapper.exists('SvgIcon[name="collapse-menu"]'));
-      assert.equal(wrapper.find('.MenuItem').prop('aria-expanded'), true);
+      assert.isTrue(wrapper.exists('SubmenuToggle'));
+      assert.equal(wrapper.find(menuItemSelector).prop('aria-expanded'), true);
 
       wrapper.setProps({ isSubmenuVisible: false });
-      assert.isTrue(wrapper.exists('SvgIcon[name="expand-menu"]'));
-      assert.equal(wrapper.find('.MenuItem').prop('aria-haspopup'), true);
-      assert.equal(wrapper.find('.MenuItem').prop('aria-expanded'), false);
-      assert.isNotOk(wrapper.find('.MenuItem').prop('aria-expanded'));
+      assert.isTrue(wrapper.exists('Icon[name="expand-menu"]'));
+      assert.equal(wrapper.find(menuItemSelector).prop('aria-haspopup'), true);
+      assert.equal(wrapper.find(menuItemSelector).prop('aria-expanded'), false);
+      assert.isNotOk(wrapper.find(menuItemSelector).prop('aria-expanded'));
     });
 
     it('does not show submenu indicator if `isSubmenuVisible` is undefined', () => {
       const wrapper = createMenuItem();
-      assert.isFalse(wrapper.exists('SvgIcon'));
+      assert.isFalse(wrapper.exists('Icon'));
       // aria-expanded should be undefined
-      assert.equal(wrapper.find('.MenuItem').prop('aria-expanded'), undefined);
+      assert.equal(
+        wrapper.find(menuItemSelector).prop('aria-expanded'),
+        undefined
+      );
     });
 
     it('calls the `onToggleSubmenu` callback when the submenu toggle is clicked', () => {
@@ -147,7 +157,7 @@ describe('MenuItem', () => {
         onToggleSubmenu: fakeOnToggleSubmenu,
         submenu: <div role="menuitem">Submenu content</div>,
       });
-      wrapper.find('.MenuItem__toggle').simulate('click');
+      wrapper.find('[data-testid="submenu-toggle"]').simulate('click');
       assert.called(fakeOnToggleSubmenu);
     });
 
@@ -158,24 +168,22 @@ describe('MenuItem', () => {
         onToggleSubmenu: fakeOnToggleSubmenu,
         submenu: <div role="menuitem">Item</div>,
       });
-      wrapper.find('.MenuItem').simulate('keydown', { key: 'ArrowRight' });
+      wrapper.find(menuItemSelector).simulate('keydown', { key: 'ArrowRight' });
       assert.called(fakeOnToggleSubmenu);
     });
 
     it('renders submenu item icons on the right', () => {
       const wrapper = createMenuItem({
-        icon: 'an-svg-icon',
+        icon: 'edit',
         isSubmenuItem: true,
         submenu: <div role="menuitem">Submenu content</div>,
       });
-      const iconSpaces = wrapper.find('.MenuItem__icon-container');
-      assert.equal(iconSpaces.length, 2);
+      const rightItem = wrapper.find('[data-testid="right-item-container"]');
 
-      // There should be a space for the parent item's icon.
-      assert.equal(iconSpaces.at(0).children().length, 0);
+      assert.equal(rightItem.length, 1);
 
       // The actual icon for the submenu should be shown on the right.
-      assert.equal(iconSpaces.at(1).children().length, 1);
+      assert.equal(rightItem.at(0).children().length, 1);
     });
 
     it('does not render submenu content if `isSubmenuVisible` is undefined', () => {
@@ -242,7 +250,10 @@ describe('MenuItem', () => {
             .closeMenu({ key: 'Enter' });
         });
         clock.tick(1);
-        assert.equal(document.activeElement.className, 'MenuItem');
+        assert.equal(
+          document.activeElement.getAttribute('data-testid'),
+          'menu-item'
+        );
       } finally {
         clock.restore();
       }
@@ -304,7 +315,7 @@ describe('MenuItem', () => {
         // eslint-disable-next-line react/display-name
         content: () => (
           <div role="menu">
-            <MenuItem label="Test" icon="an-svg-icon" />
+            <MenuItem label="Test" icon="edit" />
           </div>
         ),
       },

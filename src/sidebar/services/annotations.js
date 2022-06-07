@@ -1,13 +1,16 @@
-/** @typedef {import('../../types/api').Annotation} Annotation */
-/** @typedef {import('../../types/annotator').AnnotationData} AnnotationData */
-
+import { generateHexString } from '../../shared/random';
 import * as metadata from '../helpers/annotation-metadata';
 import {
   defaultPermissions,
   privatePermissions,
   sharedPermissions,
 } from '../helpers/permissions';
-import { generateHexString } from '../util/random';
+
+/**
+ * @typedef {import('../../types/api').Annotation} Annotation
+ * @typedef {import('../../types/annotator').AnnotationData} AnnotationData
+ * @typedef {import('../../types/api').SavedAnnotation} SavedAnnotation
+ */
 
 /**
  * A service for creating, updating and persisting annotations both in the
@@ -17,9 +20,11 @@ import { generateHexString } from '../util/random';
 export class AnnotationsService {
   /**
    * @param {import('./api').APIService} api
+   * @param {import('./annotation-activity').AnnotationActivityService} annotationActivity
    * @param {import('../store').SidebarStore} store
    */
-  constructor(api, store) {
+  constructor(annotationActivity, api, store) {
+    this._activity = annotationActivity;
     this._api = api;
     this._store = store;
   }
@@ -49,7 +54,7 @@ export class AnnotationsService {
   /**
    * Extend new annotation objects with defaults and permissions.
    *
-   * @param {AnnotationData} annotationData
+   * @param {Omit<AnnotationData, '$tag'>} annotationData
    * @param {Date} now
    * @return {Annotation}
    */
@@ -63,12 +68,16 @@ export class AnnotationsService {
     }
 
     const userid = profile.userid;
+    if (!userid) {
+      throw new Error('Cannot create annotation when logged out');
+    }
+
     const userInfo = profile.user_info;
 
     // We need a unique local/app identifier for this new annotation such
     // that we might look it up later in the store. It won't have an ID yet,
     // as it has not been persisted to the service.
-    const $tag = generateHexString(8);
+    const $tag = 's:' + generateHexString(8);
 
     /** @type {Annotation} */
     const annotation = Object.assign(
@@ -81,9 +90,10 @@ export class AnnotationsService {
         updated: now.toISOString(),
         user: userid,
         user_info: userInfo,
-        $tag: $tag,
+        $tag,
         hidden: false,
         links: {},
+        document: { title: '' },
       },
       annotationData
     );
@@ -100,7 +110,7 @@ export class AnnotationsService {
    * Create a draft for it unless it's a highlight and clear other empty
    * drafts out of the way.
    *
-   * @param {Object} annotationData
+   * @param {Omit<AnnotationData, '$tag'>} annotationData
    * @param {Date} now
    */
   create(annotationData, now = new Date()) {
@@ -160,24 +170,30 @@ export class AnnotationsService {
 
   /**
    * Delete an annotation via the API and update the store.
+   *
+   * @param {SavedAnnotation} annotation
    */
   async delete(annotation) {
     await this._api.annotation.delete({ id: annotation.id });
+    this._activity.reportActivity('delete', annotation);
     this._store.removeAnnotations([annotation]);
   }
 
   /**
    * Flag an annotation for review by a moderator.
+   *
+   * @param {SavedAnnotation} annotation
    */
   async flag(annotation) {
     await this._api.annotation.flag({ id: annotation.id });
+    this._activity.reportActivity('flag', annotation);
     this._store.updateFlagStatus(annotation.id, true);
   }
 
   /**
    * Create a reply to `annotation` by the user `userid` and add to the store.
    *
-   * @param {Object} annotation
+   * @param {SavedAnnotation} annotation
    * @param {string} userid
    */
   reply(annotation, userid) {
@@ -197,34 +213,45 @@ export class AnnotationsService {
    * Save new (or update existing) annotation. On success,
    * the annotation's `Draft` will be removed and the annotation added
    * to the store.
+   *
+   * @param {Annotation} annotation
    */
   async save(annotation) {
     let saved;
+    /** @type {import('../../types/config').AnnotationEventType} */
+    let eventType;
 
     const annotationWithChanges = this._applyDraftChanges(annotation);
 
-    if (metadata.isNew(annotation)) {
+    if (!metadata.isSaved(annotation)) {
       saved = this._api.annotation.create({}, annotationWithChanges);
+      eventType = 'create';
     } else {
       saved = this._api.annotation.update(
         { id: annotation.id },
         annotationWithChanges
       );
+      eventType = 'update';
     }
 
+    /** @type {Annotation} */
     let savedAnnotation;
     this._store.annotationSaveStarted(annotation);
     try {
       savedAnnotation = await saved;
+      this._activity.reportActivity(eventType, savedAnnotation);
     } finally {
       this._store.annotationSaveFinished(annotation);
     }
 
-    Object.keys(annotation).forEach(key => {
-      if (key[0] === '$') {
-        savedAnnotation[key] = annotation[key];
+    // Copy local/internal fields from the original annotation to the saved
+    // version.
+    for (let [key, value] of Object.entries(annotation)) {
+      if (key.startsWith('$')) {
+        const fields = /** @type {Record<string, any>} */ (savedAnnotation);
+        fields[key] = value;
       }
-    });
+    }
 
     // Clear out any pending changes (draft)
     this._store.removeDraft(annotation);

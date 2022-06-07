@@ -1,8 +1,7 @@
-import * as util from '../util';
+import { createStoreModule, makeAction } from '../create-store';
 
-import { storeModule } from '../create-store';
-
-function init(settings) {
+/** @param {import('../../../types/config').SidebarSettings} settings */
+function initialState(settings) {
   return {
     /**
      * The ID of the direct-linked group.
@@ -42,29 +41,47 @@ function init(settings) {
   };
 }
 
-const update = {
+/** @typedef {ReturnType<initialState>} State */
+
+const reducers = {
+  /**
+   * @param {State} state
+   * @param {{ directLinkedGroupFetchFailed: boolean }} action
+   */
   UPDATE_DIRECT_LINKED_GROUP_FETCH_FAILED(state, action) {
     return {
       directLinkedGroupFetchFailed: action.directLinkedGroupFetchFailed,
     };
   },
+
+  /**
+   * @param {State} state
+   * @param {{ directLinkedGroupId: string }} action
+   */
   UPDATE_DIRECT_LINKED_GROUP_ID(state, action) {
     return {
       directLinkedGroupId: action.directLinkedGroupId,
     };
   },
+
+  /**
+   * @param {State} state
+   * @param {{ directLinkedAnnotationId: string }} action
+   */
   UPDATE_DIRECT_LINKED_ANNOTATION_ID(state, action) {
     return {
       directLinkedAnnotationId: action.directLinkedAnnotationId,
     };
   },
+
   CLEAR_DIRECT_LINKED_IDS() {
     return {
       directLinkedAnnotationId: null,
       directLinkedGroupId: null,
     };
   },
-  CLEAR_SELECTION: function () {
+
+  CLEAR_SELECTION() {
     return {
       directLinkedAnnotationId: null,
       directLinkedGroupId: null,
@@ -73,46 +90,44 @@ const update = {
   },
 };
 
-const actions = util.actionTypes(update);
-
 /**
  * Set the direct linked group id.
+ *
+ * @param {string} groupId
  */
 function setDirectLinkedGroupId(groupId) {
-  return {
-    type: actions.UPDATE_DIRECT_LINKED_GROUP_ID,
+  return makeAction(reducers, 'UPDATE_DIRECT_LINKED_GROUP_ID', {
     directLinkedGroupId: groupId,
-  };
+  });
 }
 
 /**
  * Set the direct linked annotation's id.
+ *
+ * @param {string} annId
  */
 function setDirectLinkedAnnotationId(annId) {
-  return {
-    type: actions.UPDATE_DIRECT_LINKED_ANNOTATION_ID,
+  return makeAction(reducers, 'UPDATE_DIRECT_LINKED_ANNOTATION_ID', {
     directLinkedAnnotationId: annId,
-  };
+  });
 }
 
 /**
  * Set the direct linked group fetch failure to true.
  */
 function setDirectLinkedGroupFetchFailed() {
-  return {
-    type: actions.UPDATE_DIRECT_LINKED_GROUP_FETCH_FAILED,
+  return makeAction(reducers, 'UPDATE_DIRECT_LINKED_GROUP_FETCH_FAILED', {
     directLinkedGroupFetchFailed: true,
-  };
+  });
 }
 
 /**
  * Clear the direct linked group fetch failure.
  */
 function clearDirectLinkedGroupFetchFailed() {
-  return {
-    type: actions.UPDATE_DIRECT_LINKED_GROUP_FETCH_FAILED,
+  return makeAction(reducers, 'UPDATE_DIRECT_LINKED_GROUP_FETCH_FAILED', {
     directLinkedGroupFetchFailed: false,
-  };
+  });
 }
 
 /**
@@ -122,31 +137,28 @@ function clearDirectLinkedGroupFetchFailed() {
  * not affect future group/annotation etc. fetches.
  */
 function clearDirectLinkedIds() {
-  return {
-    type: actions.CLEAR_DIRECT_LINKED_IDS,
-  };
+  return makeAction(reducers, 'CLEAR_DIRECT_LINKED_IDS', undefined);
 }
 
-/**
- * Selectors
- */
+/** @param {State} state */
 function directLinkedAnnotationId(state) {
   return state.directLinkedAnnotationId;
 }
 
+/** @param {State} state */
 function directLinkedGroupId(state) {
   return state.directLinkedGroupId;
 }
 
+/** @param {State} state */
 function directLinkedGroupFetchFailed(state) {
   return state.directLinkedGroupFetchFailed;
 }
 
-export default storeModule({
-  init,
+export const directLinkedModule = createStoreModule(initialState, {
   namespace: 'directLinked',
-  update,
-  actions: {
+  reducers,
+  actionCreators: {
     setDirectLinkedGroupFetchFailed,
     setDirectLinkedGroupId,
     setDirectLinkedAnnotationId,

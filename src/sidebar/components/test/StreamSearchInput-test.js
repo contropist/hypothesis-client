@@ -1,10 +1,9 @@
 import { mount } from 'enzyme';
 import { act } from 'preact/test-utils';
 
-import StreamSearchInput from '../StreamSearchInput';
-import { $imports } from '../StreamSearchInput';
+import StreamSearchInput, { $imports } from '../StreamSearchInput';
 
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
 describe('StreamSearchInput', () => {
   let fakeRouter;
@@ -19,7 +18,7 @@ describe('StreamSearchInput', () => {
     };
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      '../store': { useSidebarStore: () => fakeStore },
     });
   });
 

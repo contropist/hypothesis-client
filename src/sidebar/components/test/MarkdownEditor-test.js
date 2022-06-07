@@ -3,10 +3,9 @@ import { render } from 'preact';
 import { act } from 'preact/test-utils';
 
 import { LinkType } from '../../markdown-commands';
-import MarkdownEditor from '../MarkdownEditor';
-import { $imports } from '../MarkdownEditor';
+import MarkdownEditor, { $imports } from '../MarkdownEditor';
 
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 import { checkAccessibility } from '../../../test-util/accessibility';
 
 describe('MarkdownEditor', () => {
@@ -112,7 +111,7 @@ describe('MarkdownEditor', () => {
         const text = 'toolbar command test';
         const wrapper = createComponent({ text, onEditText });
         const button = wrapper.find(
-          `ToolbarButton[title="${command}"] > button`
+          `ToolbarButton[title="${command}"] > IconButton button`
         );
         const input = wrapper.find('textarea').getDOMNode();
         input.selectionStart = 0;
@@ -120,9 +119,7 @@ describe('MarkdownEditor', () => {
 
         button.simulate('click');
 
-        assert.calledWith(onEditText, {
-          text: 'formatted text',
-        });
+        assert.calledWith(onEditText, 'formatted text');
         const [formatFunction, ...args] = effect;
         assert.calledWith(
           formatFunction,
@@ -153,7 +150,7 @@ describe('MarkdownEditor', () => {
               test.setOs();
               const wrapper = createComponent();
               const button = wrapper.find(
-                `ToolbarButton[title="${command}"] > button`
+                `ToolbarButton[title="${command}"] > IconButton`
               );
 
               const buttonTitlePattern = new RegExp(
@@ -185,9 +182,7 @@ describe('MarkdownEditor', () => {
               key: keyEvent.key,
             });
 
-            assert.calledWith(onEditText, {
-              text: 'formatted text',
-            });
+            assert.calledWith(onEditText, 'formatted text');
             const [formatFunction, ...args] = effect;
             assert.calledWith(
               formatFunction,
@@ -236,9 +231,7 @@ describe('MarkdownEditor', () => {
     const input = wrapper.find('textarea').getDOMNode();
     input.value = 'changed';
     wrapper.find('textarea').simulate('input');
-    assert.calledWith(onEditText, {
-      text: 'changed',
-    });
+    assert.calledWith(onEditText, 'changed');
   });
 
   it('enters preview mode when Preview button is clicked', () => {
@@ -318,171 +311,52 @@ describe('MarkdownEditor', () => {
       newContainer.remove();
     });
 
-    /**
-     * Helper method to simulate a keypress on the markdown wrapper
-     *
-     * @param {string} key - One of 'ArrowRight', 'ArrowLeft', 'End', 'Home'
-     */
     const pressKey = key =>
-      wrapper.find('.MarkdownEditor__toolbar').simulate('keydown', { key });
+      wrapper
+        .find('[data-testid="markdown-toolbar"]')
+        .simulate('keydown', { key });
 
-    /**
-     * Asserts the active button's title partially matches the supplied string.
-     *
-     * @param {string} partialTitle
-     */
-    const matchesFocusedTitle = partialTitle => {
-      assert.isTrue(
-        document.activeElement.getAttribute('title').indexOf(partialTitle) >= 0
-      );
-    };
-    /**
-     * Asserts the active button's inner text partially matches the supplied string.
-     *
-     * @param {string} partialText
-     */
-    const matchesFocusedText = partialText => {
-      assert.isTrue(document.activeElement.innerText.indexOf(partialText) >= 0);
-    };
+    function testArrowKeySequence(buttons) {
+      for (let button of buttons) {
+        pressKey('ArrowRight');
+        const label =
+          document.activeElement.getAttribute('title') ||
+          document.activeElement.innerText;
+        assert.include(label, button);
+      }
+    }
 
-    /**
-     * Asserts there should only be one "0" `tabIndex` value at a time which
-     * should be set on the focused element. All other `tabIndex` values
-     * on elements shall be "-1".
-     */
-    const testRovingIndex = () => {
-      assert.isTrue(document.activeElement.getAttribute('tabIndex') === '0');
-      assert.equal(
-        wrapper.find('ToolbarButton[tabIndex=0]').length +
-          wrapper.find('a[tabIndex=0]').length,
-        1
-      );
-    };
-
-    context('when `isPreviewing` is false', () => {
-      it('changes focus circularly to the left', () => {
-        pressKey('ArrowLeft');
-        // preview is the last button
-        matchesFocusedText('Preview');
-        testRovingIndex();
-      });
-
-      it('changes focus circularly to the right', () => {
-        pressKey('ArrowLeft'); // move to the end node
-        pressKey('ArrowRight'); // move back to the start
-        matchesFocusedTitle('Bold');
-        testRovingIndex();
-      });
-
-      it('changes focus to the last element when pressing `end`', () => {
-        pressKey('End'); // move to the end node
-        matchesFocusedText('Preview');
-        testRovingIndex();
-      });
-
-      it('changes focus to the first element when pressing `home`', () => {
-        pressKey('ArrowRight'); // move focus off first button
-        pressKey('Home');
-        matchesFocusedTitle('Bold');
-        testRovingIndex();
-      });
-
-      it('preserves the elements order and roving index', () => {
-        [
-          {
-            title: 'Italic',
-          },
-          {
-            title: 'Quote',
-          },
-          {
-            title: 'Insert link',
-          },
-          {
-            title: 'Insert image',
-          },
-          {
-            title: 'Insert math (LaTeX is supported)',
-          },
-          {
-            title: 'Numbered list',
-          },
-          {
-            title: 'Bulleted list',
-          },
-          {
-            title: 'Formatting help',
-          },
-          {
-            text: 'Preview',
-          },
-          {
-            // back to the start
-            title: 'Bold',
-          },
-        ].forEach(test => {
-          pressKey('ArrowRight');
-          if (test.title) {
-            matchesFocusedTitle(test.title);
-          }
-          if (test.text) {
-            matchesFocusedText(test.text);
-          }
-          testRovingIndex();
-        });
-      });
+    // This is a basic test that arrow key navigation is enabled.
+    // `useArrowKeyNavigation` tests cover behavior in more detail.
+    it('arrow keys navigate through buttons', () => {
+      // Sequence of buttons we expect to be focused when the first action
+      // ("Bold") action is initially focused and we press the right arrow key
+      // until focus returns to it.
+      const buttons = [
+        'Italic',
+        'Quote',
+        'Insert link',
+        'Insert image',
+        'Insert math',
+        'Numbered list',
+        'Bulleted list',
+        'Formatting help',
+        'Preview',
+        'Bold',
+      ];
+      testArrowKeySequence(buttons);
     });
 
-    context('when `isPreviewing` is true', () => {
-      beforeEach(() => {
-        // turn on Preview mode
-        act(() => {
-          wrapper.find('Toolbar').props().onTogglePreview();
-        });
-        const previewButton = wrapper
-          .find('button')
-          .filterWhere(el => el.text() === 'Write');
-        previewButton.simulate('focus');
-        pressKey('Home');
-      });
+    it('arrow keys navigate through enabled buttons when `isPreviewing` is true', () => {
+      const previewButton = wrapper
+        .find('button')
+        .filterWhere(el => el.text() === 'Preview');
+      previewButton.simulate('click');
 
-      it('changes focus to the last element when pressing `end`', () => {
-        pressKey('End'); // move to the end node
-        matchesFocusedText('Write');
-        testRovingIndex();
-      });
+      pressKey('Home');
 
-      it('changes focus to the first element when pressing `home`', () => {
-        pressKey('ArrowRight'); // move focus off first button
-        pressKey('Home');
-        matchesFocusedTitle('Formatting help');
-        testRovingIndex();
-      });
-
-      it('preserves the elements order', () => {
-        [
-          {
-            text: 'Write',
-          },
-          {
-            title: 'Formatting help',
-          },
-          {
-            // back to the start
-            text: 'Write',
-          },
-        ].forEach(test => {
-          // only 2 enabled buttons
-          pressKey('ArrowRight');
-          if (test.title) {
-            matchesFocusedTitle(test.title);
-          }
-          if (test.text) {
-            matchesFocusedText(test.text);
-          }
-          testRovingIndex();
-        });
-      });
+      const buttons = ['Write', 'Formatting help', 'Write'];
+      testArrowKeySequence(buttons);
     });
   });
 
@@ -501,7 +375,7 @@ describe('MarkdownEditor', () => {
     });
     wrapper.update();
 
-    assert.deepEqual(wrapper.find('MarkdownView').prop('textStyle'), textStyle);
+    assert.deepEqual(wrapper.find('MarkdownView').prop('style'), textStyle);
   });
 
   it(

@@ -3,7 +3,7 @@ import { mount } from 'enzyme';
 import SearchInput from '../SearchInput';
 import { $imports } from '../SearchInput';
 
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 import { checkAccessibility } from '../../../test-util/accessibility';
 
 describe('SearchInput', () => {
@@ -24,7 +24,7 @@ describe('SearchInput', () => {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      '../store': { useSidebarStore: () => fakeStore },
     });
   });
 

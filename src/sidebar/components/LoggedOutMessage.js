@@ -1,10 +1,10 @@
-import { LinkButton, SvgIcon } from '@hypothesis/frontend-shared';
+import { Link, LinkButton, Icon } from '@hypothesis/frontend-shared';
 
-import { useStoreProxy } from '../store/use-store';
+import { useSidebarStore } from '../store';
 
 /**
  * @typedef LoggedOutMessageProps
- * @prop {() => any} onLogin
+ * @prop {() => void} onLogin
  */
 
 /**
@@ -15,39 +15,35 @@ import { useStoreProxy } from '../store/use-store';
  * @param {LoggedOutMessageProps} props
  */
 function LoggedOutMessage({ onLogin }) {
-  const store = useStoreProxy();
+  const store = useSidebarStore();
 
   return (
-    <div className="LoggedOutMessage">
-      <span>
+    <div className="flex flex-col items-center m-6 space-y-6">
+      <span className="text-center">
         This is a public annotation created with Hypothesis. <br />
         To reply or make your own annotations on this document,{' '}
-        <a
-          className="LoggedOutMessage__link"
+        <Link
+          classes="inline text-color-text underline hover:underline"
           href={store.getLink('signup')}
           target="_blank"
-          rel="noopener noreferrer"
         >
           create a free account
-        </a>{' '}
+        </Link>{' '}
         or{' '}
-        <LinkButton
-          className="InlineLinkButton"
-          onClick={onLogin}
-          variant="dark"
-        >
+        <LinkButton classes="inline underline" onClick={onLogin} variant="dark">
           log in
         </LinkButton>
         .
       </span>
-      <div className="LoggedOutMessage__logo">
-        <a
+      <div>
+        <Link
           href="https://hypothes.is"
           aria-label="Hypothesis homepage"
+          target="_blank"
           title="Hypothesis homepage"
         >
-          <SvgIcon name="logo" className="LoggedOutMessage__logo-icon" />
-        </a>
+          <Icon name="logo" classes="w-16 h-16 text-grey-7" />
+        </Link>
       </div>
     </div>
   );

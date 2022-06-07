@@ -1,6 +1,6 @@
 import { ToastMessengerService } from '../toast-messenger';
 
-describe('ToastMessengerService', function () {
+describe('ToastMessengerService', () => {
   let clock;
   let fakeStore;
   let service;
@@ -39,11 +39,15 @@ describe('ToastMessengerService', function () {
     it('adds a new success toast message to the store', () => {
       fakeStore.hasToastMessage.returns(false);
 
-      service.success('hooray');
+      service.success('hooray', { visuallyHidden: true });
 
       assert.calledWith(
         fakeStore.addToastMessage,
-        sinon.match({ type: 'success', message: 'hooray' })
+        sinon.match({
+          type: 'success',
+          message: 'hooray',
+          visuallyHidden: true,
+        })
       );
     });
 

@@ -1,26 +1,56 @@
-import warnOnce from '../shared/warn-once';
+import { warnOnce } from '../shared/warn-once';
 
-// Array to keep track of pre-start requests
+import { normalizeGroupIds } from './helpers/groups';
+
+/**
+ * @typedef {import('../types/rpc').FocusUserInfo} FocusUserInfo
+ */
+
+/**
+ * List of not-yet-processed messages received during application startup.
+ *
+ * @type {MessageEvent[]}
+ */
 let preStartQueue = [];
 
 /**
  * Return the mapped methods that can be called remotely via this server.
  *
- * @param {Object} store - The global store
- * @return {Object}
+ * @param {import('./store').SidebarStore} store - The global store
  */
 const registeredMethods = store => {
   return {
-    changeFocusModeUser: store.changeFocusModeUser,
+    /** @param {FocusUserInfo} userInfo */
+    changeFocusModeUser: userInfo => {
+      store.changeFocusModeUser(userInfo);
+
+      const groupIds = userInfo?.groups ?? [];
+      const filteredGroupIds = normalizeGroupIds(groupIds, store.allGroups());
+      if (groupIds.length && !filteredGroupIds.length) {
+        console.error('No matching groups found in list of filtered group IDs');
+      }
+      store.filterGroups(filteredGroupIds);
+    },
   };
 };
+
+/**
+ * See https://www.jsonrpc.org/specification#request_object.
+ *
+ * @typedef JSONRPCRequest
+ * @prop {string} jsonrpc
+ * @prop {string} id
+ * @prop {string} method
+ * @prop {unknown[]} [params]
+ */
 
 /**
  * Return true if `data` "looks like" a JSON-RPC message.
  *
  * @param {any} data
+ * @return {data is JSONRPCRequest}
  */
-function isJsonRpcMessage(data) {
+function isJSONRPCRequest(data) {
   // eslint-disable-next-line eqeqeq
   if (data == null || typeof data !== 'object') {
     return false;
@@ -46,9 +76,14 @@ function isJsonRpcMessage(data) {
  * notifications) and sending back a successful "ok" response.
  *
  * All methods called upon must be mapped in the `registeredMethods` function.
+ *
+ * @param {import('./store').SidebarStore} store
+ * @param {import('../types/config').SidebarSettings} settings
+ * @param {Window} $window
+ * @inject
  */
-// @inject
 export function startServer(store, settings, $window) {
+  /** @type {Record<string, (...args: any[]) => void>} */
   const methods = registeredMethods(store);
 
   // Process the pre-start incoming RPC requests
@@ -62,10 +97,11 @@ export function startServer(store, settings, $window) {
   // Start listening to new RPC requests
   $window.addEventListener('message', receiveMessage);
 
+  /** @param {MessageEvent} event */
   function receiveMessage(event) {
     let allowedOrigins = settings.rpcAllowedOrigins || [];
 
-    if (!isJsonRpcMessage(event.data)) {
+    if (!isJSONRPCRequest(event.data)) {
       return;
     }
 
@@ -80,10 +116,15 @@ export function startServer(store, settings, $window) {
     // data param.
     let jsonRpcRequest = event.data;
 
-    event.source.postMessage(jsonRpcResponse(jsonRpcRequest), event.origin);
+    const source = /** @type {Window} */ (event.source);
+    source.postMessage(jsonRpcResponse(jsonRpcRequest), event.origin);
   }
 
-  /** Return a JSON-RPC response to the given JSON-RPC request object. */
+  /**
+   * Return a JSON-RPC response to the given JSON-RPC request object.
+   *
+   * @param {JSONRPCRequest} request
+   */
   function jsonRpcResponse(request) {
     const method = methods[request.method];
 

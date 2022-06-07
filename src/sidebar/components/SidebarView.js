@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'preact/hooks';
 
-import useRootThread from './hooks/use-root-thread';
+import { useRootThread } from './hooks/use-root-thread';
 import { withServices } from '../service-context';
-import { useStoreProxy } from '../store/use-store';
+import { useSidebarStore } from '../store';
 import { tabForAnnotation } from '../helpers/tabs';
 
 import FilterStatus from './FilterStatus';
@@ -14,11 +14,11 @@ import ThreadList from './ThreadList';
 
 /**
  * @typedef SidebarViewProps
- * @prop {() => any} onLogin
- * @prop {() => any} onSignUp
+ * @prop {() => void} onLogin
+ * @prop {() => void} onSignUp
  * @prop {import('../services/frame-sync').FrameSyncService} frameSync
- * @prop {ReturnType<import('../services/load-annotations').default>} loadAnnotationsService  - Injected service
- * @prop {import('../services/streamer').default} streamer - Injected service
+ * @prop {import('../services/load-annotations').LoadAnnotationsService} loadAnnotationsService
+ * @prop {import('../services/streamer').StreamerService} streamer
  */
 
 /**
@@ -36,7 +36,7 @@ function SidebarView({
   const rootThread = useRootThread();
 
   // Store state values
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const focusedGroupId = store.focusedGroupId();
   const hasAppliedFilter =
     store.hasAppliedFilter() || store.hasSelectedAnnotations();
@@ -83,20 +83,25 @@ function SidebarView({
     !hasDirectLinkedAnnotationError &&
     !isLoading;
 
-  /** @type {import("preact/hooks").Ref<string|null>} */
   const prevGroupId = useRef(focusedGroupId);
 
   // Reload annotations when group, user or document search URIs change
   useEffect(() => {
     if (!prevGroupId.current || prevGroupId.current !== focusedGroupId) {
-      // Clear any selected annotations and filters when the group ID changes.
-      //
+      // Clear any selected annotations and filters when the focused group
+      // changes.
       // We don't clear the selection/filters on the initial load when
       // the focused group transitions from null to non-null, as this would clear
       // any filters intended to be used for the initial display (eg. to focus
       // on a particular user).
       if (prevGroupId.current) {
+        // Respect applied focus-mode filtering when changing focused group
+        let restoreFocus = store.focusState().active;
+
         store.clearSelection();
+        if (restoreFocus) {
+          store.toggleFocusMode(true);
+        }
       }
       prevGroupId.current = focusedGroupId;
     }
@@ -137,7 +142,7 @@ function SidebarView({
 
   return (
     <div>
-      <h2 className="u-screen-reader-only">Annotations</h2>
+      <h2 className="sr-only">Annotations</h2>
       {showFilterStatus && <FilterStatus />}
       <LoginPromptPanel onLogin={onLogin} onSignUp={onSignUp} />
       {hasDirectLinkedAnnotationError && (
@@ -157,6 +162,8 @@ function SidebarView({
   );
 }
 
-SidebarView.injectedProps = ['frameSync', 'loadAnnotationsService', 'streamer'];
-
-export default withServices(SidebarView);
+export default withServices(SidebarView, [
+  'frameSync',
+  'loadAnnotationsService',
+  'streamer',
+]);

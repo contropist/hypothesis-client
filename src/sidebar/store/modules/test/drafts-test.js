@@ -1,9 +1,9 @@
-import createStore from '../../create-store';
-import annotations from '../annotations';
-import drafts from '../drafts';
+import { createStore } from '../../create-store';
+import { annotationsModule } from '../annotations';
+import { draftsModule } from '../drafts';
 import { Draft } from '../drafts';
-import selection from '../selection';
-import immutable from '../../../util/immutable';
+import { selectionModule } from '../selection';
+import { immutable } from '../../../util/immutable';
 
 const fixtures = immutable({
   draftWithText: {
@@ -31,7 +31,10 @@ describe('store/modules/drafts', () => {
   let store;
 
   beforeEach(() => {
-    store = createStore([drafts, annotations, selection], [{}]);
+    store = createStore(
+      [draftsModule, annotationsModule, selectionModule],
+      [{}]
+    );
   });
 
   describe('Draft', () => {

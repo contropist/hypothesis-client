@@ -1,4 +1,4 @@
-import { useStoreProxy } from '../store/use-store';
+import { useSidebarStore } from '../store';
 import { withServices } from '../service-context';
 
 import SearchInput from './SearchInput';
@@ -16,8 +16,9 @@ import SearchInput from './SearchInput';
  * @param {StreamSearchInputProps} props
  */
 function StreamSearchInput({ router }) {
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const query = store.routeParams().q;
+  /** @param {string} query */
   const setQuery = query => {
     // Re-route the user to `/stream` if they are on `/a/:id` and then set
     // the search query.
@@ -29,6 +30,4 @@ function StreamSearchInput({ router }) {
   );
 }
 
-StreamSearchInput.injectedProps = ['router'];
-
-export default withServices(StreamSearchInput);
+export default withServices(StreamSearchInput, ['router']);

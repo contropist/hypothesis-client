@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'preact/hooks';
 
-import { useStoreProxy } from '../store/use-store';
+import { useSidebarStore } from '../store';
 import { withServices } from '../service-context';
-import useRootThread from './hooks/use-root-thread';
+import { useRootThread } from './hooks/use-root-thread';
 
 import ThreadList from './ThreadList';
 import SidebarContentError from './SidebarContentError';
 
 /**
  * @typedef AnnotationViewProps
- * @prop {() => any} onLogin
- * @prop {ReturnType<import('../services/load-annotations').default>} loadAnnotationsService - Injected service
+ * @prop {() => void} onLogin
+ * @prop {import('../services/load-annotations').LoadAnnotationsService} loadAnnotationsService
  */
 
 /**
@@ -19,7 +19,7 @@ import SidebarContentError from './SidebarContentError';
  * @param {AnnotationViewProps} props
  */
 function AnnotationView({ loadAnnotationsService, onLogin }) {
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const annotationId = store.routeParams().id;
   const rootThread = useRootThread();
   const userid = store.profile().userid;
@@ -56,7 +56,9 @@ function AnnotationView({ loadAnnotationsService, onLogin }) {
 
         // Make the full thread of annotations visible. By default replies are
         // not shown until the user expands the thread.
-        annots.forEach(annot => store.setExpanded(annot.id, true));
+        annots.forEach(annot =>
+          store.setExpanded(/** @type {string} */ (annot.id), true)
+        );
 
         // FIXME - This should show a visual indication of which reply the
         // annotation ID in the URL refers to. That isn't currently working.
@@ -92,6 +94,4 @@ function AnnotationView({ loadAnnotationsService, onLogin }) {
   );
 }
 
-AnnotationView.injectedProps = ['loadAnnotationsService'];
-
-export default withServices(AnnotationView);
+export default withServices(AnnotationView, ['loadAnnotationsService']);

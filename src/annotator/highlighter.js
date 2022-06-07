@@ -1,3 +1,4 @@
+import { isInPlaceholder } from './anchoring/placeholder';
 import { isNodeInRange } from './range-util';
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
@@ -12,7 +13,7 @@ const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
  *   A `<hypothesis-highlight>` element in the page's text layer
  * @return {HTMLCanvasElement|null}
  */
-function getPdfCanvas(highlightEl) {
+function getPDFCanvas(highlightEl) {
   // This code assumes that PDF.js renders pages with a structure like:
   //
   // <div class="page">
@@ -43,27 +44,29 @@ function getPdfCanvas(highlightEl) {
 /**
  * Draw highlights in an SVG layer overlaid on top of a PDF.js canvas.
  *
- * Returns `null` if `highlightEl` is not above a PDF.js page canvas.
+ * The created SVG elements are stored in the `svgHighlight` property of
+ * each `HighlightElement`.
  *
- * @param {HTMLElement} highlightEl -
+ * @param {HighlightElement[]} highlightEls -
  *   An element that wraps the highlighted text in the transparent text layer
  *   above the PDF.
- * @return {SVGElement|null} -
- *   The SVG graphic element that corresponds to the highlight or `null` if
- *   no PDF page was found below the highlight.
  */
-function drawHighlightsAbovePdfCanvas(highlightEl) {
-  const canvasEl = getPdfCanvas(highlightEl);
+function drawHighlightsAbovePDFCanvas(highlightEls) {
+  if (highlightEls.length === 0) {
+    return;
+  }
+
+  // Get the <canvas> for the PDF page containing the highlight. We assume all
+  // the highlights are on the same page.
+  const canvasEl = getPDFCanvas(highlightEls[0]);
   if (!canvasEl || !canvasEl.parentElement) {
-    return null;
+    return;
   }
 
   /** @type {SVGElement|null} */
   let svgHighlightLayer = canvasEl.parentElement.querySelector(
     '.hypothesis-highlight-layer'
   );
-
-  const isCssBlendSupported = CSS.supports('mix-blend-mode', 'multiply');
 
   if (!svgHighlightLayer) {
     // Create SVG layer. This must be in the same stacking context as
@@ -83,43 +86,36 @@ function drawHighlightsAbovePdfCanvas(highlightEl) {
     svgStyle.width = '100%';
     svgStyle.height = '100%';
 
-    if (isCssBlendSupported) {
-      // Use multiply blending so that highlights drawn on top of text darken it
-      // rather than making it lighter. This improves contrast and thus readability
-      // of highlighted text, especially for overlapping highlights.
-      //
-      // This choice optimizes for the common case of dark text on a light background.
-      //
-      // @ts-ignore - `mixBlendMode` property is missing from type definitions.
-      svgStyle.mixBlendMode = 'multiply';
-    } else {
-      // For older browsers (eg. Edge < 79) we draw all the highlights as
-      // opaque and then make the entire highlight layer transparent. This means
-      // that there is no visual indication of whether text has one or multiple
-      // highlights, but it preserves readability.
-      svgStyle.opacity = '0.3';
-    }
+    // Use multiply blending so that highlights drawn on top of text darken it
+    // rather than making it lighter. This improves contrast and thus readability
+    // of highlighted text, especially for overlapping highlights.
+    //
+    // This choice optimizes for the common case of dark text on a light background.
+    svgStyle.mixBlendMode = 'multiply';
   }
 
   const canvasRect = canvasEl.getBoundingClientRect();
-  const highlightRect = highlightEl.getBoundingClientRect();
+  const highlightRects = highlightEls.map(highlightEl => {
+    const highlightRect = highlightEl.getBoundingClientRect();
 
-  // Create SVG element for the current highlight element.
-  const rect = document.createElementNS(SVG_NAMESPACE, 'rect');
-  rect.setAttribute('x', (highlightRect.left - canvasRect.left).toString());
-  rect.setAttribute('y', (highlightRect.top - canvasRect.top).toString());
-  rect.setAttribute('width', highlightRect.width.toString());
-  rect.setAttribute('height', highlightRect.height.toString());
-
-  if (isCssBlendSupported) {
+    // Create SVG element for the current highlight element.
+    const rect = document.createElementNS(SVG_NAMESPACE, 'rect');
+    rect.setAttribute('x', (highlightRect.left - canvasRect.left).toString());
+    rect.setAttribute('y', (highlightRect.top - canvasRect.top).toString());
+    rect.setAttribute('width', highlightRect.width.toString());
+    rect.setAttribute('height', highlightRect.height.toString());
     rect.setAttribute('class', 'hypothesis-svg-highlight');
-  } else {
-    rect.setAttribute('class', 'hypothesis-svg-highlight is-opaque');
-  }
 
-  svgHighlightLayer.appendChild(rect);
+    // Make the highlight in the text layer transparent.
+    highlightEl.classList.add('is-transparent');
 
-  return rect;
+    // Associate SVG element with highlight for use by `removeHighlights`.
+    highlightEl.svgHighlight = rect;
+
+    return rect;
+  });
+
+  svgHighlightLayer.append(...highlightRects);
 }
 
 /**
@@ -167,7 +163,9 @@ function wholeTextNodesInRange(range) {
   }
 
   const textNodes = [];
-  const nodeIter = /** @type {Document} */ (root.ownerDocument).createNodeIterator(
+  const nodeIter = /** @type {Document} */ (
+    root.ownerDocument
+  ).createNodeIterator(
     root,
     NodeFilter.SHOW_TEXT // Only return `Text` nodes.
   );
@@ -207,18 +205,14 @@ function wholeTextNodesInRange(range) {
 export function highlightRange(range, cssClass = 'hypothesis-highlight') {
   const textNodes = wholeTextNodesInRange(range);
 
-  // Check if this range refers to a placeholder for not-yet-rendered text in
+  // Check if this range refers to a placeholder for not-yet-rendered content in
   // a PDF. These highlights should be invisible.
-  const isPlaceholder =
-    textNodes.length > 0 &&
-    /** @type {Element} */ (textNodes[0].parentNode).closest(
-      '.annotator-placeholder'
-    ) !== null;
+  const inPlaceholder = textNodes.length > 0 && isInPlaceholder(textNodes[0]);
 
   // Group text nodes into spans of adjacent nodes. If a group of text nodes are
   // adjacent, we only need to create one highlight element for the group.
-  let textNodeSpans = [];
-  let prevNode = null;
+  let textNodeSpans = /** @type {Text[][]} */ ([]);
+  let prevNode = /** @type {Node|null} */ (null);
   let currentSpan = null;
 
   textNodes.forEach(node => {
@@ -237,11 +231,11 @@ export function highlightRange(range, cssClass = 'hypothesis-highlight') {
   const whitespace = /^\s*$/;
   textNodeSpans = textNodeSpans.filter(span =>
     // Check for at least one text node with non-space content.
-    span.some(node => !whitespace.test(node.nodeValue))
+    span.some(node => !whitespace.test(node.data))
   );
 
   // Wrap each text node span with a `<hypothesis-highlight>` element.
-  const highlights = [];
+  const highlights = /** @type {HighlightElement[]} */ ([]);
   textNodeSpans.forEach(nodes => {
     // A custom element name is used here rather than `<span>` to reduce the
     // likelihood of highlights being hidden by page styling.
@@ -250,25 +244,25 @@ export function highlightRange(range, cssClass = 'hypothesis-highlight') {
     const highlightEl = document.createElement('hypothesis-highlight');
     highlightEl.className = cssClass;
 
-    nodes[0].parentNode.replaceChild(highlightEl, nodes[0]);
+    const parent = /** @type {Node} */ (nodes[0].parentNode);
+    parent.replaceChild(highlightEl, nodes[0]);
     nodes.forEach(node => highlightEl.appendChild(node));
-
-    if (!isPlaceholder) {
-      // For PDF highlights, create the highlight effect by using an SVG placed
-      // above the page's canvas rather than CSS `background-color` on the
-      // highlight element. This enables more control over blending of the
-      // highlight with the content below.
-      const svgHighlight = drawHighlightsAbovePdfCanvas(highlightEl);
-      if (svgHighlight) {
-        highlightEl.className += ' is-transparent';
-
-        // Associate SVG element with highlight for use by `removeHighlights`.
-        highlightEl.svgHighlight = svgHighlight;
-      }
-    }
 
     highlights.push(highlightEl);
   });
+
+  // For PDF highlights, create the highlight effect by using an SVG placed
+  // above the page's canvas rather than CSS `background-color` on the highlight
+  // element. This enables more control over blending of the highlight with the
+  // content below.
+  //
+  // Drawing these SVG highlights involves measuring the `<hypothesis-highlight>`
+  // elements, so we create them only after those elements have all been created
+  // to reduce the number of forced reflows. We also skip creating them for
+  // unrendered pages for performance reasons.
+  if (!inPlaceholder) {
+    drawHighlightsAbovePDFCanvas(highlights);
+  }
 
   return highlights;
 }
@@ -332,6 +326,16 @@ export function setHighlightsFocused(highlights, focused) {
     // `<hypothesis-highlight>` element.
     if (h.svgHighlight) {
       h.svgHighlight.classList.toggle('is-focused', focused);
+
+      // Ensure that focused highlights are drawn above un-focused highlights
+      // on the same page.
+      //
+      // SVG elements are rendered in document order so to achieve this we need
+      // to move the element to be the last child of its parent.
+      if (focused) {
+        const parent = /** @type {SVGElement} */ (h.svgHighlight.parentNode);
+        parent.append(h.svgHighlight);
+      }
     } else {
       h.classList.toggle('hypothesis-highlight-focused', focused);
     }

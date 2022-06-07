@@ -1,9 +1,9 @@
 /**
  * @typedef {import('../../types/api').Annotation} Annotation
- * @typedef {import('../../types/config').HostConfig} HostConfig
+ * @typedef {import('../../types/config').SidebarSettings} SidebarSettings
  */
 
-import serviceConfig from '../config/service-config';
+import { serviceConfig } from '../config/service-config';
 
 /**
  * Retrieve an appropriate sharing link for this annotation.
@@ -63,16 +63,14 @@ export function isShareableURI(uri) {
  * Is the sharing of annotations enabled? Check for any defined `serviceConfig`,
  * but default to `true` if none found.
  *
- * @param {HostConfig} settings
+ * @param {SidebarSettings} settings
  * @return {boolean}
  */
 export function sharingEnabled(settings) {
-  const serviceConfig_ = serviceConfig(settings);
-  if (serviceConfig_ === null) {
-    return true;
+  const service = serviceConfig(settings);
+
+  if (service?.enableShareLinks === false) {
+    return false;
   }
-  if (typeof serviceConfig_.enableShareLinks !== 'boolean') {
-    return true;
-  }
-  return serviceConfig_.enableShareLinks;
+  return true;
 }

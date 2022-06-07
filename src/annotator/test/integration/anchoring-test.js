@@ -1,9 +1,8 @@
 // Tests that the expected parts of the page are highlighted when annotations
 // with various combinations of selector are anchored.
 
-import Guest from '../../guest';
-import { $imports as guestImports } from '../../guest';
-import { EventBus } from '../../util/emitter';
+import { Guest, $imports as guestImports } from '../../guest';
+import testPageHTML from './test-page.html';
 
 function quoteSelector(quote) {
   return {
@@ -30,7 +29,7 @@ function annotateQuote(quote) {
  */
 function highlightedPhrases(container) {
   return Array.from(container.querySelectorAll('.hypothesis-highlight')).map(
-    function (el) {
+    el => {
       return el.textContent;
     }
   );
@@ -40,40 +39,36 @@ function simplifyWhitespace(quote) {
   return quote.replace(/\s+/g, ' ');
 }
 
-function FakeCrossFrame() {
-  this.destroy = sinon.stub();
-  this.onConnect = sinon.stub();
-  this.on = sinon.stub();
-  this.sync = sinon.stub();
-}
-
-describe('anchoring', function () {
+describe('anchoring', () => {
   let guest;
   let container;
-
-  before(() => {
-    guestImports.$mock({
-      './cross-frame': { CrossFrame: FakeCrossFrame },
-    });
-  });
-
-  after(() => {
-    guestImports.$restore();
-  });
 
   beforeEach(() => {
     sinon.stub(console, 'warn');
     container = document.createElement('div');
-    container.innerHTML = require('./test-page.html');
+    container.innerHTML = testPageHTML;
     document.body.appendChild(container);
-    const eventBus = new EventBus();
-    guest = new Guest(container, eventBus);
+
+    const fakePortFinder = {
+      discover: sinon.stub().callsFake(async () => {
+        return new MessageChannel().port1;
+      }),
+      destroy: sinon.stub(),
+    };
+    guestImports.$mock({
+      '../shared/messaging': {
+        PortFinder: sinon.stub().returns(fakePortFinder),
+      },
+    });
+
+    guest = new Guest(container);
   });
 
   afterEach(() => {
     guest.destroy();
-    container.parentNode.removeChild(container);
+    container.remove();
     console.warn.restore();
+    guestImports.$restore();
   });
 
   [
@@ -92,20 +87,20 @@ describe('anchoring', function () {
   ].forEach(testCase => {
     it(`should highlight ${testCase.tag} when annotations are loaded`, () => {
       const normalize = function (quotes) {
-        return quotes.map(function (q) {
+        return quotes.map(q => {
           return simplifyWhitespace(q);
         });
       };
 
-      const annotations = testCase.quotes.map(function (q) {
+      const annotations = testCase.quotes.map(q => {
         return annotateQuote(q);
       });
 
-      const anchored = annotations.map(function (ann) {
+      const anchored = annotations.map(ann => {
         return guest.anchor(ann);
       });
 
-      return Promise.all(anchored).then(function () {
+      return Promise.all(anchored).then(() => {
         const assertFn = testCase.expectFail
           ? assert.notDeepEqual
           : assert.deepEqual;

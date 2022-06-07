@@ -1,63 +1,82 @@
-import events from '../../shared/bridge-events';
-import features from '../features';
-import { $imports } from '../features';
+import { FeatureFlags, $imports } from '../features';
 
-describe('features - annotation layer', function () {
-  let featureFlagsUpdateHandler;
+describe('FeatureFlags', () => {
   let fakeWarnOnce;
 
-  const initialFeatures = {
+  const testFlags = {
     feature_on: true,
     feature_off: false,
   };
 
-  const setFeatures = function (features) {
-    featureFlagsUpdateHandler(features || initialFeatures);
-  };
-
-  beforeEach(function () {
+  beforeEach(() => {
     fakeWarnOnce = sinon.stub();
     $imports.$mock({
-      '../shared/warn-once': fakeWarnOnce,
+      '../shared/warn-once': { warnOnce: fakeWarnOnce },
     });
-
-    features.init({
-      on: function (topic, handler) {
-        if (topic === events.FEATURE_FLAGS_UPDATED) {
-          featureFlagsUpdateHandler = handler;
-        }
-      },
-    });
-
-    // set default features
-    setFeatures();
   });
 
-  afterEach(function () {
-    features.reset();
+  afterEach(() => {
     $imports.$restore();
   });
 
-  describe('flagEnabled', function () {
-    it('should retrieve features data', function () {
-      assert.equal(features.flagEnabled('feature_on'), true);
-      assert.equal(features.flagEnabled('feature_off'), false);
+  function createFeatureFlags() {
+    return new FeatureFlags(Object.keys(testFlags));
+  }
+
+  describe('#update', () => {
+    it('emits "flagsChanged" notification with new flags', () => {
+      const onFlagsChanged = sinon.stub();
+      const features = createFeatureFlags();
+
+      features.on('flagsChanged', onFlagsChanged);
+      features.update(testFlags);
+
+      assert.calledOnce(onFlagsChanged);
     });
 
-    it('should return false if features have not been loaded', function () {
-      // simulate feature data not having been loaded yet
-      features.reset();
-      assert.equal(features.flagEnabled('feature_on'), false);
+    it('updates flags returned by `flagEnabled`', () => {
+      const features = createFeatureFlags();
+      assert.isFalse(features.flagEnabled('feature_on'));
+
+      features.update(testFlags);
+
+      assert.isTrue(features.flagEnabled('feature_on'));
+    });
+  });
+
+  describe('#flagEnabled', () => {
+    it('returns current flag status', () => {
+      const features = createFeatureFlags();
+
+      features.update(testFlags);
+
+      assert.isTrue(features.flagEnabled('feature_on'));
+      assert.isFalse(features.flagEnabled('feature_off'));
     });
 
-    it('should return false for unknown flags', function () {
-      assert.isFalse(features.flagEnabled('unknown_feature'));
+    it('returns false if flags are not loaded', () => {
+      const features = createFeatureFlags();
+      assert.isFalse(features.flagEnabled('feature_on'));
     });
 
-    it('should warn when accessing unknown flags', function () {
+    it('should warn when accessing unknown flags', () => {
+      const features = createFeatureFlags();
+
+      features.update(testFlags);
+
       assert.isFalse(features.flagEnabled('unknown_feature'));
       assert.calledOnce(fakeWarnOnce);
-      assert.calledWith(fakeWarnOnce, 'looked up unknown feature');
+      assert.calledWith(fakeWarnOnce, 'Looked up unknown feature');
+    });
+  });
+
+  describe('#allFlags', () => {
+    it('returns a record with all feature flags', () => {
+      const features = createFeatureFlags();
+
+      features.update(testFlags);
+
+      assert.deepEqual(features.allFlags(), testFlags);
     });
   });
 });

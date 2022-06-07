@@ -1,14 +1,14 @@
 import { TinyEmitter } from 'tiny-emitter';
 
-import serviceConfig from '../config/service-config';
-import OAuthClient from '../util/oauth-client';
+import { serviceConfig } from '../config/service-config';
+import { OAuthClient } from '../util/oauth-client';
 import { resolve } from '../util/url';
 
 /**
  * @typedef {import('../util/oauth-client').TokenInfo} TokenInfo
  *
  * @typedef RefreshOptions
- * @property {boolean} persist - True if access tokens should be persisted for
+ * @prop {boolean} persist - True if access tokens should be persisted for
  *   use in future sessions.
  */
 
@@ -33,6 +33,7 @@ export class AuthService extends TinyEmitter {
    * @param {import('./api-routes').APIRoutesService} apiRoutes
    * @param {import('./local-storage').LocalStorageService} localStorage
    * @param {import('./toast-messenger').ToastMessengerService} toastMessenger
+   * @param {import('../../types/config').SidebarSettings} settings
    */
   constructor($window, apiRoutes, localStorage, settings, toastMessenger) {
     super();
@@ -62,6 +63,8 @@ export class AuthService extends TinyEmitter {
 
     /**
      * Show an error message telling the user that the access token has expired.
+     *
+     * @param {string} message
      */
     function showAccessTokenExpiredErrorMessage(message) {
       toastMessenger.error(`Hypothesis login lost: ${message}`, {
@@ -111,6 +114,8 @@ export class AuthService extends TinyEmitter {
 
     /**
      * Persist access & refresh tokens for future use.
+     *
+     * @param {TokenInfo} token
      */
     function saveToken(token) {
       localStorage.setObject(storageKey(), token);
@@ -270,9 +275,15 @@ export class AuthService extends TinyEmitter {
      * then exchange for access and refresh tokens.
      */
     async function login() {
-      const authWindow = OAuthClient.openAuthPopupWindow($window);
+      // Any async steps before the call to `client.authorize` must complete
+      // in less than ~1 second, otherwise the browser's popup blocker may block
+      // the popup.
+      //
+      // `oauthClient` is async in case in needs to fetch links from the API.
+      // This should already have happened by the time this function is called
+      // however, so it will just be returning a cached value.
       const client = await oauthClient();
-      const code = await client.authorize($window, authWindow);
+      const code = await client.authorize($window);
 
       // Save the auth code. It will be exchanged for an access token when the
       // next API request is made.

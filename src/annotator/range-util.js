@@ -42,14 +42,13 @@ export function isNodeInRange(range, node) {
  * `callback` for each of them.
  *
  * @param {Range} range
- * @param {(n: Node) => any} callback
+ * @param {(n: Node) => void} callback
  */
 export function forEachNodeInRange(range, callback) {
   const root = range.commonAncestorContainer;
-  const nodeIter = /** @type {Document} */ (root.ownerDocument).createNodeIterator(
-    root,
-    NodeFilter.SHOW_ALL
-  );
+  const nodeIter = /** @type {Document} */ (
+    root.ownerDocument
+  ).createNodeIterator(root, NodeFilter.SHOW_ALL);
 
   let currentNode;
   while ((currentNode = nodeIter.nextNode())) {
@@ -67,18 +66,19 @@ export function forEachNodeInRange(range, callback) {
  */
 export function getTextBoundingBoxes(range) {
   const whitespaceOnly = /^\s*$/;
-  const textNodes = [];
-  forEachNodeInRange(range, function (node) {
+  const textNodes = /** @type {Text[]} */ ([]);
+  forEachNodeInRange(range, node => {
     if (
       node.nodeType === Node.TEXT_NODE &&
       !(/** @type {string} */ (node.textContent).match(whitespaceOnly))
     ) {
-      textNodes.push(node);
+      textNodes.push(/** @type {Text} */ (node));
     }
   });
 
+  /** @type {DOMRect[]} */
   let rects = [];
-  textNodes.forEach(function (node) {
+  textNodes.forEach(node => {
     const nodeRange = node.ownerDocument.createRange();
     nodeRange.selectNodeContents(node);
     if (node === range.startContainer) {
@@ -135,10 +135,12 @@ export function selectionFocusRect(selection) {
  * @template T
  * @param {Range} range
  * @param {(n: Node) => T} itemForNode - Callback returning the item for a given node
- * @return {T[]} items
+ * @return {NonNullable<T>[]} items
  */
 export function itemsForRange(range, itemForNode) {
+  /** @type {Set<Node>} */
   const checkedNodes = new Set();
+  /** @type {Set<NonNullable<T>>} */
   const items = new Set();
 
   forEachNodeInRange(range, node => {
@@ -150,8 +152,10 @@ export function itemsForRange(range, itemForNode) {
       }
       checkedNodes.add(current);
 
-      const item = itemForNode(current);
-      if (item) {
+      const item = /** @type {NonNullable<T>|null|undefined} */ (
+        itemForNode(current)
+      );
+      if (item !== null && item !== undefined) {
         items.add(item);
       }
 

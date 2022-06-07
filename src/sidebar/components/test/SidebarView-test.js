@@ -1,10 +1,8 @@
 import { mount } from 'enzyme';
 
-import SidebarView from '../SidebarView';
-import { $imports } from '../SidebarView';
-
 import { checkAccessibility } from '../../../test-util/accessibility';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
+import SidebarView, { $imports } from '../SidebarView';
 
 describe('SidebarView', () => {
   let fakeFrameSync;
@@ -48,8 +46,10 @@ describe('SidebarView', () => {
       annotationExists: sinon.stub(),
       directLinkedAnnotationId: sinon.stub(),
       directLinkedGroupFetchFailed: sinon.stub(),
+      filteredGroupIDs: sinon.stub().returns([]),
       findAnnotationByID: sinon.stub(),
       focusedGroupId: sinon.stub(),
+      focusState: sinon.stub().returns({ active: false }),
       hasAppliedFilter: sinon.stub(),
       hasFetchedAnnotations: sinon.stub(),
       hasFetchedProfile: sinon.stub().returns(true),
@@ -59,6 +59,7 @@ describe('SidebarView', () => {
       isLoggedIn: sinon.stub(),
       profile: sinon.stub().returns({ userid: null }),
       searchUris: sinon.stub().returns([]),
+      toggleFocusMode: sinon.stub(),
     };
 
     fakeTabsUtil = {
@@ -67,8 +68,8 @@ describe('SidebarView', () => {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      './hooks/use-root-thread': fakeUseRootThread,
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      './hooks/use-root-thread': { useRootThread: fakeUseRootThread },
+      '../store': { useSidebarStore: () => fakeStore },
       '../helpers/tabs': fakeTabsUtil,
     });
   });
@@ -94,11 +95,23 @@ describe('SidebarView', () => {
       assert.notCalled(fakeStore.clearSelection);
     });
 
-    it('clears selected annotations and loads annotations when groupId changes', () => {
+    it('clears selected annotations and selections and loads annotations when groupId changes', () => {
       fakeStore.focusedGroupId.returns('affable');
       wrapper.setProps({});
+      assert.calledOnce(fakeStore.focusState);
       assert.calledOnce(fakeLoadAnnotationsService.load);
       assert.calledOnce(fakeStore.clearSelection);
+      assert.notCalled(fakeStore.toggleFocusMode);
+    });
+
+    it('restores focus mode after changing focused group', () => {
+      fakeStore.focusedGroupId.returns('affable');
+      fakeStore.focusState.returns({ active: true });
+
+      wrapper.setProps({});
+
+      assert.calledOnce(fakeStore.clearSelection);
+      assert.calledWith(fakeStore.toggleFocusMode, true);
     });
 
     it('does not clear selected annotations when group ID is first set on startup', () => {

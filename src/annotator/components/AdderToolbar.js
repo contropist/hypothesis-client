@@ -1,14 +1,66 @@
 import classnames from 'classnames';
-import { SvgIcon } from '@hypothesis/frontend-shared';
+import { LabeledButton, Icon } from '@hypothesis/frontend-shared';
 
 import { useShortcut } from '../../shared/shortcut';
 
 /**
- * @param {Object} props
+ * Render an inverted light-on-dark "pill" with the given `badgeCount`
+ * (annotation count). This is rendered instead of an icon on the toolbar
+ * button for "show"-ing associated annotations for the current selection.
+ *
+ * @param {object} props
+ *  @param {number} props.badgeCount
+ */
+function NumberIcon({ badgeCount }) {
+  return (
+    <span
+      className={classnames(
+        'rounded px-1 py-0.5',
+        'text-color-text-inverted font-bold bg-grey-7',
+        'dim-bg'
+      )}
+    >
+      {badgeCount}
+    </span>
+  );
+}
+
+/**
+ * Render an arrow pointing up or down from the AdderToolbar. This arrow
+ * should point roughly to the end of the user selection in the document.
+ *
+ * @param {object} props
+ *  @param {'up'|'down'} props.arrowDirection
+ */
+function AdderToolbarArrow({ arrowDirection }) {
+  return (
+    <Icon
+      name="pointer"
+      classes={classnames(
+        // Position the arrow in the horizontal center at the bottom of the
+        // container (toolbar). Note: the arrow is pointing up at this point.
+        'absolute left-1/2 -translate-x-1/2',
+        // Override `1em` width/height rules in `Icon` to size the arrow as
+        // its SVG dimensions dictate
+        'h-auto w-auto z-2',
+        'text-grey-3 fill-white',
+        {
+          // Down arrow: transform to point the arrow down
+          'rotate-180': arrowDirection === 'down',
+          // Up arrow: position vertically above the toolbar
+          'top-0 -translate-y-full': arrowDirection === 'up',
+        }
+      )}
+    />
+  );
+}
+
+/**
+ * @param {object} props
  *  @param {number} [props.badgeCount]
  *  @param {string} [props.icon]
  *  @param {string} props.label
- *  @param {() => any} props.onClick
+ *  @param {() => void} props.onClick
  *  @param {string|null} props.shortcut
  */
 function ToolbarButton({ badgeCount, icon, label, onClick, shortcut }) {
@@ -17,25 +69,27 @@ function ToolbarButton({ badgeCount, icon, label, onClick, shortcut }) {
   const title = shortcut ? `${label} (${shortcut})` : label;
 
   return (
-    <button
-      className="AdderToolbar__button"
+    <LabeledButton
+      className={classnames(
+        'flex flex-col gap-y-1 items-center py-2.5 px-2',
+        'text-annotator-sm leading-none text-grey-7',
+        'transition-colors duration-200',
+        'dim-item'
+      )}
       onClick={onClick}
-      aria-label={title}
       title={title}
     >
-      {icon && <SvgIcon name={icon} className="AdderToolbar__icon" />}
-      {typeof badgeCount === 'number' && (
-        <span className="AdderToolbar__badge">{badgeCount}</span>
-      )}
-      <span className="AdderToolbar__label">{label}</span>
-    </button>
+      {icon && <Icon classes="text-annotator-lg" name={icon} title={title} />}
+      {typeof badgeCount === 'number' && <NumberIcon badgeCount={badgeCount} />}
+      <span className="font-normal">{label}</span>
+    </LabeledButton>
   );
 }
 
 /**
  * Union of possible toolbar commands.
  *
- * @typedef {'annotate'|'highlight'|'show'} Command
+ * @typedef {'annotate'|'highlight'|'show'|'hide'} Command
  */
 
 /**
@@ -45,7 +99,7 @@ function ToolbarButton({ badgeCount, icon, label, onClick, shortcut }) {
  *   should appear above the toolbar pointing Up or below the toolbar pointing
  *   Down.
  * @prop {boolean} isVisible - Whether to show the toolbar or not.
- * @prop {(c: Command) => any} onCommand - Called when a toolbar button is clicked.
+ * @prop {(c: Command) => void} onCommand - Called when a toolbar button is clicked.
  * @prop {number} [annotationCount] -
  *   Number of annotations associated with the selected text.
  *   If non-zero, a "Show" button is displayed to allow the user to see the
@@ -53,8 +107,8 @@ function ToolbarButton({ badgeCount, icon, label, onClick, shortcut }) {
  */
 
 /**
- * The toolbar that is displayed above selected text in the document providing
- * options to create annotations or highlights.
+ * The toolbar that is displayed above or below selected text in the document,
+ * providing options to create annotations or highlights.
  *
  * @param {AdderToolbarProps} props
  */
@@ -70,19 +124,36 @@ export default function AdderToolbar({
   const annotateShortcut = isVisible ? 'a' : null;
   const highlightShortcut = isVisible ? 'h' : null;
   const showShortcut = isVisible ? 's' : null;
+  const hideShortcut = isVisible ? 'Escape' : null;
+
+  // Add a shortcut to close the adder. Note, there is no button associated with this
+  // shortcut because any outside click will also hide the adder.
+  useShortcut(hideShortcut, () => onCommand('hide'));
 
   // nb. The adder is hidden using the `visibility` property rather than `display`
   // so that we can compute its size in order to position it before display.
   return (
     <div
-      className={classnames('AdderToolbar', {
-        'AdderToolbar--down': arrowDirection === 'up',
-        'AdderToolbar--up': arrowDirection === 'down',
-        'is-active': isVisible,
-      })}
-      style={{ visibility: isVisible ? 'visible' : 'hidden' }}
+      className={classnames(
+        'AdderToolbar',
+        'absolute select-none bg-white rounded shadow-adder-toolbar',
+        // Because `.AdderToolbar` rules reset `all:initial`, we cannot use
+        // default border values from Tailwind and have to be explicit about
+        // all border attributes
+        'border border-solid border-grey-3',
+        // Start at a very low opacity as we're going to fade in in the animation
+        'opacity-5',
+        {
+          'animate-adder-pop-up': arrowDirection === 'up' && isVisible,
+          'animate-adder-pop-down': arrowDirection === 'down' && isVisible,
+        }
+      )}
+      dir="ltr"
+      style={{
+        visibility: isVisible ? 'visible' : 'hidden',
+      }}
     >
-      <div className="AdderToolbar__actions">
+      <div className="flex dim-items-on-hover">
         <ToolbarButton
           icon="annotate"
           onClick={() => onCommand('annotate')}
@@ -95,24 +166,24 @@ export default function AdderToolbar({
           label="Highlight"
           shortcut={highlightShortcut}
         />
-        {annotationCount > 0 && <div className="AdderToolbar__separator" />}
         {annotationCount > 0 && (
-          <ToolbarButton
-            badgeCount={annotationCount}
-            onClick={() => onCommand('show')}
-            label="Show"
-            shortcut={showShortcut}
-          />
+          <>
+            <div
+              className={classnames(
+                // Style a vertical separator line
+                'm-1.5 border-r border-grey-4 border-solid'
+              )}
+            />
+            <ToolbarButton
+              badgeCount={annotationCount}
+              onClick={() => onCommand('show')}
+              label="Show"
+              shortcut={showShortcut}
+            />
+          </>
         )}
       </div>
-      <SvgIcon
-        name="pointer"
-        inline={true}
-        className={classnames('AdderToolbar__arrow', {
-          'AdderToolbar__arrow--down': arrowDirection === 'down',
-          'AdderToolbar__arrow--up': arrowDirection === 'up',
-        })}
-      />
+      <AdderToolbarArrow arrowDirection={arrowDirection} />
     </div>
   );
 }

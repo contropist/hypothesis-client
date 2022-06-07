@@ -1,7 +1,5 @@
-import events from '../../shared/bridge-events';
-
-import Sidebar, { MIN_RESIZE } from '../sidebar';
-import { $imports } from '../sidebar';
+import { addConfigFragment } from '../../shared/config-fragment';
+import { Sidebar, MIN_RESIZE, $imports } from '../sidebar';
 import { EventBus } from '../util/emitter';
 
 const DEFAULT_WIDTH = 350;
@@ -9,19 +7,24 @@ const DEFAULT_HEIGHT = 600;
 const EXTERNAL_CONTAINER_SELECTOR = 'test-external-container';
 
 describe('Sidebar', () => {
+  const sidebarURL = new URL(
+    '/base/annotator/test/empty.html',
+    window.location.href
+  ).toString();
+
   const sandbox = sinon.createSandbox();
-  let fakeCrossFrame;
-  let fakeGuest;
 
   // Containers and Sidebar instances created by current test.
   let containers;
   let sidebars;
 
+  let FakePortRPC;
+  let fakePortRPCs;
   let FakeBucketBar;
   let fakeBucketBar;
-
   let FakeToolbarController;
   let fakeToolbar;
+  let fakeSendErrorsTo;
 
   before(() => {
     sinon.stub(window, 'requestAnimationFrame').yields();
@@ -31,20 +34,71 @@ describe('Sidebar', () => {
     window.requestAnimationFrame.restore();
   });
 
+  // Helpers for getting the channels used for host <-> guest/sidebar communication.
+  // These currently rely on knowing the implementation detail of which order
+  // the channels are created in.
+
+  const sidebarRPC = () => {
+    return fakePortRPCs[0];
+  };
+
+  /** Return the PortRPC instance for the first connected guest. */
+  const guestRPC = (index = 1) => {
+    return fakePortRPCs[index];
+  };
+
+  const emitNthGuestEvent = (index = 1, event, ...args) => {
+    const result = [];
+    for (let [evt, fn] of guestRPC(index).on.args) {
+      if (event === evt) {
+        result.push(fn(...args));
+      }
+    }
+    return result;
+  };
+
+  const emitGuestEvent = (event, ...args) => {
+    return emitNthGuestEvent(1, event, ...args);
+  };
+
+  const emitSidebarEvent = (event, ...args) => {
+    const result = [];
+    for (let [evt, fn] of sidebarRPC().on.args) {
+      if (event === evt) {
+        result.push(fn(...args));
+      }
+    }
+    return result;
+  };
+
+  /**
+   * Simulate the sidebar application connecting with the host frame. This happens
+   * when the sidebar has loaded and is ready.
+   */
+  const connectSidebarApp = () => {
+    emitSidebarEvent('connect');
+  };
+
+  /**
+   * Simulate a new guest frame connecting to the sidebar.
+   */
+  const connectGuest = sidebar => {
+    const { port1 } = new MessageChannel();
+    sidebar.onFrameConnected('guest', port1);
+  };
+
   const createSidebar = (config = {}) => {
-    config = Object.assign(
-      {
-        // Dummy sidebar app.
-        sidebarAppUrl: '/base/annotator/test/empty.html',
-      },
-      config
-    );
+    config = {
+      // Dummy sidebar app.
+      sidebarAppUrl: sidebarURL,
+      ...config,
+    };
     const container = document.createElement('div');
     document.body.appendChild(container);
     containers.push(container);
 
     const eventBus = new EventBus();
-    const sidebar = new Sidebar(container, eventBus, fakeGuest, config);
+    const sidebar = new Sidebar(container, eventBus, config);
     sidebars.push(sidebar);
 
     return sidebar;
@@ -65,22 +119,24 @@ describe('Sidebar', () => {
   beforeEach(() => {
     sidebars = [];
     containers = [];
-    fakeCrossFrame = {
-      on: sandbox.stub(),
-      call: sandbox.stub(),
-    };
 
-    class FakeGuest {
-      constructor() {
-        this.element = document.createElement('div');
-        this.contentContainer = sinon.stub().returns(document.body);
-        this.createAnnotation = sinon.stub();
-        this.crossframe = fakeCrossFrame;
-        this.fitSideBySide = sinon.stub();
-        this.setVisibleHighlights = sinon.stub();
-      }
-    }
-    fakeGuest = new FakeGuest();
+    fakePortRPCs = [];
+    FakePortRPC = sinon.stub().callsFake(() => {
+      const rpc = {
+        call: sinon.stub(),
+        connect: sinon.stub(),
+        destroy: sinon.stub(),
+        on: sinon.stub(),
+      };
+      fakePortRPCs.push(rpc);
+      return rpc;
+    });
+
+    fakeBucketBar = {
+      destroy: sinon.stub(),
+      update: sinon.stub(),
+    };
+    FakeBucketBar = sinon.stub().returns(fakeBucketBar);
 
     fakeToolbar = {
       getWidth: sinon.stub().returns(100),
@@ -92,19 +148,22 @@ describe('Sidebar', () => {
     };
     FakeToolbarController = sinon.stub().returns(fakeToolbar);
 
-    fakeBucketBar = {
-      destroy: sinon.stub(),
-      update: sinon.stub(),
-    };
-    FakeBucketBar = sandbox.stub().returns(fakeBucketBar);
+    fakeSendErrorsTo = sinon.stub();
 
-    sidebars = [];
+    const fakeCreateAppConfig = sinon.spy((appURL, config) => {
+      const appConfig = { ...config };
+      delete appConfig.sidebarAppUrl;
+      return appConfig;
+    });
 
     $imports.$mock({
+      '../shared/frame-error-capture': { sendErrorsTo: fakeSendErrorsTo },
+      '../shared/messaging': { PortRPC: FakePortRPC },
+      './bucket-bar': { BucketBar: FakeBucketBar },
+      './config/app': { createAppConfig: fakeCreateAppConfig },
       './toolbar': {
         ToolbarController: FakeToolbarController,
       },
-      './bucket-bar': { default: FakeBucketBar },
     });
   });
 
@@ -131,69 +190,42 @@ describe('Sidebar', () => {
 
     it('applies a style if theme is configured as "clean"', () => {
       const sidebar = createSidebar({ theme: 'clean' });
-      assert.isTrue(
-        sidebar.iframeContainer.classList.contains(
-          'annotator-frame--theme-clean'
-        )
-      );
+      assert.isTrue(sidebar.iframeContainer.classList.contains('theme-clean'));
     });
 
-    it('becomes visible when the "panelReady" event fires', () => {
+    it('becomes visible when the sidebar application has loaded', async () => {
       const sidebar = createSidebar();
-      sidebar._emitter.publish('panelReady');
+      connectSidebarApp();
+      await sidebar.ready;
       assert.equal(sidebar.iframeContainer.style.display, '');
     });
+  });
+
+  describe('#iframe', () => {
+    it('returns a reference to the `<iframe>` containing the sidebar', () => {
+      const sidebar = createSidebar();
+      const iframe = containers[0]
+        .querySelector('hypothesis-sidebar')
+        .shadowRoot.querySelector('iframe');
+      assert.equal(sidebar.iframe, iframe);
+    });
+  });
+
+  it('registers sidebar app as a handler for errors in the host frame', () => {
+    const sidebar = createSidebar();
+    assert.calledWith(fakeSendErrorsTo, sidebar.iframe.contentWindow);
   });
 
   function getConfigString(sidebar) {
     return sidebar.iframe.src;
   }
 
-  function configFragment(config) {
-    return '#config=' + encodeURIComponent(JSON.stringify(config));
-  }
-
   it('creates sidebar iframe and passes configuration to it', () => {
-    const appURL = new URL(
-      '/base/annotator/test/empty.html',
-      window.location.href
-    );
     const sidebar = createSidebar({ annotations: '1234' });
     assert.equal(
       getConfigString(sidebar),
-      appURL + configFragment({ annotations: '1234' })
+      addConfigFragment(sidebarURL, { annotations: '1234' })
     );
-  });
-
-  context('when a new annotation is created', () => {
-    function stubIframeWindow(sidebar) {
-      const iframe = sidebar.iframe;
-      const fakeIframeWindow = { focus: sinon.stub() };
-      sinon.stub(iframe, 'contentWindow').get(() => fakeIframeWindow);
-      return iframe;
-    }
-
-    it('focuses the sidebar if the annotation is not a highlight', () => {
-      const sidebar = createSidebar();
-      const iframe = stubIframeWindow(sidebar);
-
-      sidebar._emitter.publish('beforeAnnotationCreated', {
-        $highlight: false,
-      });
-
-      assert.called(iframe.contentWindow.focus);
-    });
-
-    it('does not focus the sidebar if the annotation is a highlight', () => {
-      const sidebar = createSidebar();
-      const iframe = stubIframeWindow(sidebar);
-
-      sidebar._emitter.publish('beforeAnnotationCreated', {
-        $highlight: true,
-      });
-
-      assert.notCalled(iframe.contentWindow.focus);
-    });
   });
 
   describe('toolbar buttons', () => {
@@ -211,61 +243,98 @@ describe('Sidebar', () => {
 
     it('shows or hides highlights when toolbar button is clicked', () => {
       const sidebar = createSidebar();
-      sinon.stub(sidebar, 'setAllVisibleHighlights');
+      sinon.stub(sidebar, 'setHighlightsVisible');
 
       FakeToolbarController.args[0][1].setHighlightsVisible(true);
-      assert.calledWith(sidebar.setAllVisibleHighlights, true);
-      sidebar.setAllVisibleHighlights.resetHistory();
+      assert.calledWith(sidebar.setHighlightsVisible, true);
+      sidebar.setHighlightsVisible.resetHistory();
 
       FakeToolbarController.args[0][1].setHighlightsVisible(false);
-      assert.calledWith(sidebar.setAllVisibleHighlights, false);
+      assert.calledWith(sidebar.setHighlightsVisible, false);
     });
 
-    it('creates an annotation when toolbar button is clicked', () => {
+    it("doesn't throw when creating an annotation by clicking in toolbar button and there are not connected guests", () => {
+      createSidebar();
+
+      FakeToolbarController.args[0][1].createAnnotation();
+    });
+
+    it('creates an annotation in the first connected guest when toolbar button is clicked', () => {
       const sidebar = createSidebar();
+      connectGuest(sidebar);
 
       FakeToolbarController.args[0][1].createAnnotation();
 
-      assert.called(sidebar.guest.createAnnotation);
+      assert.calledWith(guestRPC().call, 'createAnnotation');
     });
 
-    it('sets create annotation button to "Annotation" when selection becomes non-empty', () => {
-      const sidebar = createSidebar();
+    it('creates an annotation in guest with selected text when toolbar button is clicked', () => {
+      const sidebar = createSidebar({});
+      connectGuest(sidebar);
+      connectGuest(sidebar);
 
-      // nb. This event is normally published by the Guest, but the sidebar
-      // doesn't care about that.
-      sidebar._emitter.publish('hasSelectionChanged', true);
+      emitNthGuestEvent(2, 'textSelected');
+      FakeToolbarController.args[0][1].createAnnotation();
+
+      assert.neverCalledWith(guestRPC(1).call, 'createAnnotation');
+      assert.calledWith(guestRPC(2).call, 'createAnnotation');
+    });
+
+    it('creates an annotation in the first connected guest if guest with selected text has closed', () => {
+      const sidebar = createSidebar({});
+      connectGuest(sidebar);
+      connectGuest(sidebar);
+
+      emitNthGuestEvent(2, 'textSelected');
+      emitNthGuestEvent(2, 'close');
+      FakeToolbarController.args[0][1].createAnnotation();
+
+      assert.calledWith(guestRPC(1).call, 'createAnnotation');
+      assert.neverCalledWith(guestRPC(2).call, 'createAnnotation');
+    });
+
+    it('toggles create annotation button to "Annotation" when selection becomes non-empty', () => {
+      const sidebar = createSidebar();
+      connectGuest(sidebar);
+      connectGuest(sidebar);
+
+      emitGuestEvent('textSelected');
 
       assert.equal(sidebar.toolbar.newAnnotationType, 'annotation');
+      assert.neverCalledWith(guestRPC(1).call, 'clearSelection');
+      assert.calledWith(guestRPC(2).call, 'clearSelection');
     });
 
-    it('sets create annotation button to "Page Note" when selection becomes empty', () => {
+    it('toggles create annotation button to "Page Note" when selection becomes empty', () => {
       const sidebar = createSidebar();
+      connectGuest(sidebar);
+      connectGuest(sidebar);
+      emitGuestEvent('textSelected');
+      assert.equal(sidebar.toolbar.newAnnotationType, 'annotation');
 
-      // nb. This event is normally published by the Guest, but the sidebar
-      // doesn't care about that.
-      sidebar._emitter.publish('hasSelectionChanged', false);
+      emitGuestEvent('textUnselected');
 
       assert.equal(sidebar.toolbar.newAnnotationType, 'note');
+      assert.neverCalledWith(guestRPC(1).call, 'clearSelection');
+      assert.calledWith(guestRPC(2).call, 'clearSelection');
     });
   });
 
-  describe('crossframe listeners', () => {
-    const emitEvent = (event, ...args) => {
-      const result = [];
-      for (let [evt, fn] of fakeCrossFrame.on.args) {
-        if (event === evt) {
-          result.push(fn(...args));
-        }
-      }
-      return result;
-    };
+  describe('events from sidebar frame', () => {
+    describe('on "showHighlights" event', () => {
+      it('makes all highlights visible', () => {
+        createSidebar();
+        assert.isFalse(fakeToolbar.highlightsVisible);
+        emitSidebarEvent('showHighlights');
+        assert.isTrue(fakeToolbar.highlightsVisible);
+      });
+    });
 
     describe('on "open" event', () =>
       it('opens the frame', () => {
         const target = sandbox.stub(Sidebar.prototype, 'open');
         createSidebar();
-        emitEvent('openSidebar');
+        emitSidebarEvent('openSidebar');
         assert.called(target);
       }));
 
@@ -273,16 +342,16 @@ describe('Sidebar', () => {
       it('closes the frame', () => {
         const target = sandbox.stub(Sidebar.prototype, 'close');
         createSidebar();
-        emitEvent('closeSidebar');
+        emitSidebarEvent('closeSidebar');
         assert.called(target);
       }));
 
-    describe('on "openNotebook" crossframe event', () => {
+    describe('on "openNotebook" event', () => {
       it('hides the sidebar', () => {
         const sidebar = createSidebar();
         sinon.stub(sidebar, 'hide').callThrough();
         sinon.stub(sidebar._emitter, 'publish');
-        emitEvent('openNotebook', 'mygroup');
+        emitSidebarEvent('openNotebook', 'mygroup');
         assert.calledWith(sidebar._emitter.publish, 'openNotebook', 'mygroup');
         assert.calledOnce(sidebar.hide);
         assert.notEqual(sidebar.iframeContainer.style.visibility, 'hidden');
@@ -299,12 +368,12 @@ describe('Sidebar', () => {
       });
     });
 
-    describe('on LOGIN_REQUESTED event', () => {
+    describe('on "loginRequested" event', () => {
       it('calls the onLoginRequest callback function if one was provided', () => {
         const onLoginRequest = sandbox.stub();
         createSidebar({ services: [{ onLoginRequest }] });
 
-        emitEvent(events.LOGIN_REQUESTED);
+        emitSidebarEvent('loginRequested');
 
         assert.called(onLoginRequest);
       });
@@ -324,7 +393,7 @@ describe('Sidebar', () => {
           ],
         });
 
-        emitEvent(events.LOGIN_REQUESTED);
+        emitSidebarEvent('loginRequested');
 
         assert.called(firstOnLogin);
         assert.notCalled(secondOnLogin);
@@ -344,7 +413,7 @@ describe('Sidebar', () => {
           ],
         });
 
-        emitEvent(events.LOGIN_REQUESTED);
+        emitSidebarEvent('loginRequested');
 
         assert.notCalled(secondOnLogin);
         assert.notCalled(thirdOnLogin);
@@ -352,59 +421,118 @@ describe('Sidebar', () => {
 
       it('does not crash if there is no services', () => {
         createSidebar(); // No config.services
-        emitEvent(events.LOGIN_REQUESTED);
+        emitSidebarEvent('loginRequested');
       });
 
       it('does not crash if services is an empty array', () => {
         createSidebar({ services: [] });
-        emitEvent(events.LOGIN_REQUESTED);
+        emitSidebarEvent('loginRequested');
       });
 
       it('does not crash if the first service has no onLoginRequest', () => {
         createSidebar({ services: [{}] });
-        emitEvent(events.LOGIN_REQUESTED);
+        emitSidebarEvent('loginRequested');
       });
     });
 
-    describe('on LOGOUT_REQUESTED event', () =>
+    describe('on "logoutRequested" event', () =>
       it('calls the onLogoutRequest callback function', () => {
         const onLogoutRequest = sandbox.stub();
         createSidebar({ services: [{ onLogoutRequest }] });
 
-        emitEvent(events.LOGOUT_REQUESTED);
+        emitSidebarEvent('logoutRequested');
 
         assert.called(onLogoutRequest);
       }));
 
-    describe('on SIGNUP_REQUESTED event', () =>
+    describe('on "signupRequested" event', () =>
       it('calls the onSignupRequest callback function', () => {
         const onSignupRequest = sandbox.stub();
         createSidebar({ services: [{ onSignupRequest }] });
 
-        emitEvent(events.SIGNUP_REQUESTED);
+        emitSidebarEvent('signupRequested');
 
         assert.called(onSignupRequest);
       }));
 
-    describe('on PROFILE_REQUESTED event', () =>
+    describe('on "profileRequested" event', () =>
       it('calls the onProfileRequest callback function', () => {
         const onProfileRequest = sandbox.stub();
         createSidebar({ services: [{ onProfileRequest }] });
 
-        emitEvent(events.PROFILE_REQUESTED);
+        emitSidebarEvent('profileRequested');
 
         assert.called(onProfileRequest);
       }));
 
-    describe('on HELP_REQUESTED event', () =>
+    describe('on "helpRequested" event', () =>
       it('calls the onHelpRequest callback function', () => {
         const onHelpRequest = sandbox.stub();
         createSidebar({ services: [{ onHelpRequest }] });
 
-        emitEvent(events.HELP_REQUESTED);
+        emitSidebarEvent('helpRequested');
 
         assert.called(onHelpRequest);
       }));
+
+    describe('on "featureFlagsUpdated" event', () => {
+      it('updates feature flags in host frame', () => {
+        const sidebar = createSidebar();
+
+        emitSidebarEvent('featureFlagsUpdated', {
+          some_flag: true,
+          other_flag: false,
+        });
+
+        assert.deepEqual(sidebar.features.allFlags(), {
+          some_flag: true,
+          other_flag: false,
+        });
+      });
+    });
+  });
+
+  describe('events from the guest frames', () => {
+    describe('on "anchorsChanged" event', () => {
+      it('updates the bucket bar', () => {
+        const sidebar = createSidebar();
+        connectGuest(sidebar);
+
+        const anchorPositions = [{ tag: 't0', top: 1, bottom: 2 }];
+        emitGuestEvent('anchorsChanged', anchorPositions);
+
+        assert.calledOnce(sidebar.bucketBar.update);
+        assert.calledWith(sidebar.bucketBar.update, anchorPositions);
+
+        sidebar.bucketBar.update.resetHistory();
+
+        // Second connected Guest does register a listener for the
+        // `anchorsChanged` RPC event but it is inactive.
+        connectGuest(sidebar);
+        const anchorChangedCallback = fakePortRPCs[2].on
+          .getCalls()
+          .find(({ args }) => args[0] === 'anchorsChanged').args[1];
+        anchorChangedCallback(anchorPositions);
+        assert.notCalled(sidebar.bucketBar.update);
+      });
+    });
+
+    describe('on "close" event', () => {
+      it('disconnects the guest', () => {
+        const sidebar = createSidebar();
+        connectGuest(sidebar);
+        guestRPC().call.resetHistory();
+
+        emitGuestEvent('close');
+
+        assert.called(guestRPC().destroy);
+
+        // Trigger a notification to all connected guests. This should no longer
+        // be sent to the guest that has just been disconnected.
+        sidebar.open();
+        assert.notCalled(guestRPC().call);
+      });
+    });
   });
 
   describe('pan gestures', () => {
@@ -419,7 +547,7 @@ describe('Sidebar', () => {
         sidebar._onPan({ type: 'panstart' });
 
         assert.isTrue(
-          sidebar.iframeContainer.classList.contains('annotator-no-transition')
+          sidebar.iframeContainer.classList.contains('sidebar-no-transition')
         );
         assert.equal(sidebar.iframeContainer.style.pointerEvents, 'none');
       });
@@ -438,7 +566,7 @@ describe('Sidebar', () => {
         sidebar._gestureState = { final: 0 };
         sidebar._onPan({ type: 'panend' });
         assert.isFalse(
-          sidebar.iframeContainer.classList.contains('annotator-no-transition')
+          sidebar.iframeContainer.classList.contains('sidebar-no-transition')
         );
         assert.equal(sidebar.iframeContainer.style.pointerEvents, '');
       });
@@ -470,47 +598,39 @@ describe('Sidebar', () => {
       }));
   });
 
-  describe('panelReady event', () => {
-    it('opens the sidebar when a direct-linked annotation is present.', () => {
-      const sidebar = createSidebar({
-        annotations: 'ann-id',
+  describe('when the sidebar application has loaded', () => {
+    [
+      {
+        test: 'a direct-linked annotation is present',
+        config: { annotations: 'ann-id' },
+      },
+      {
+        test: 'a direct-linked group is present',
+        config: { group: 'group-id' },
+      },
+      {
+        test: 'a direct-linked query is present',
+        config: { query: 'tag:foo' },
+      },
+      {
+        test: '`openSidebar` is set to true',
+        config: { openSidebar: true },
+      },
+    ].forEach(({ test, config }) => {
+      it(`opens the sidebar when ${test}`, async () => {
+        const sidebar = createSidebar(config);
+        const open = sandbox.stub(sidebar, 'open');
+        connectSidebarApp();
+        await sidebar.ready;
+        assert.calledOnce(open);
       });
-      const open = sandbox.stub(sidebar, 'open');
-      sidebar._emitter.publish('panelReady');
-      assert.calledOnce(open);
     });
 
-    it('opens the sidebar when a direct-linked group is present.', () => {
-      const sidebar = createSidebar({
-        group: 'group-id',
-      });
-      const open = sandbox.stub(sidebar, 'open');
-      sidebar._emitter.publish('panelReady');
-      assert.calledOnce(open);
-    });
-
-    it('opens the sidebar when a direct-linked query is present.', () => {
-      const sidebar = createSidebar({
-        query: 'tag:foo',
-      });
-      const open = sandbox.stub(sidebar, 'open');
-      sidebar._emitter.publish('panelReady');
-      assert.calledOnce(open);
-    });
-
-    it('opens the sidebar when openSidebar is set to true.', () => {
-      const sidebar = createSidebar({
-        openSidebar: true,
-      });
-      const open = sandbox.stub(sidebar, 'open');
-      sidebar._emitter.publish('panelReady');
-      assert.calledOnce(open);
-    });
-
-    it('does not open the sidebar if not configured to.', () => {
+    it('does not open the sidebar if not configured to', async () => {
       const sidebar = createSidebar();
       const open = sandbox.stub(sidebar, 'open');
-      sidebar._emitter.publish('panelReady');
+      connectSidebarApp();
+      await sidebar.ready;
       assert.notCalled(open);
     });
   });
@@ -531,19 +651,49 @@ describe('Sidebar', () => {
       sidebar.destroy();
       assert.called(sidebar.bucketBar.destroy);
     });
+
+    it('unregisters sidebar as handler for host frame errors', () => {
+      const sidebar = createSidebar();
+      fakeSendErrorsTo.resetHistory();
+
+      sidebar.destroy();
+
+      assert.calledWith(fakeSendErrorsTo, null);
+    });
+  });
+
+  describe('#onFrameConnected', () => {
+    it('ignores unrecognized source frames', () => {
+      const sidebar = createSidebar();
+      const { port1 } = new MessageChannel();
+      sidebar.onFrameConnected('dummy', port1);
+
+      assert.notCalled(sidebarRPC().connect);
+      assert.isUndefined(guestRPC());
+    });
+
+    it('create RPC channels for recognized source frames', () => {
+      const sidebar = createSidebar();
+      const { port1 } = new MessageChannel();
+      sidebar.onFrameConnected('sidebar', port1);
+      sidebar.onFrameConnected('guest', port1);
+
+      assert.calledWith(sidebarRPC().connect, port1);
+      assert.calledWith(guestRPC().connect, port1);
+    });
   });
 
   describe('#open', () => {
     it('shows highlights if "showHighlights" is set to "whenSidebarOpen"', () => {
       const sidebar = createSidebar({ showHighlights: 'whenSidebarOpen' });
       sidebar.open();
-      assert.calledWith(sidebar.guest.setVisibleHighlights, true);
+      assert.calledWith(sidebarRPC().call, 'setHighlightsVisible', true);
     });
 
     it('does not show highlights otherwise', () => {
       const sidebar = createSidebar({ showHighlights: 'never' });
       sidebar.open();
-      assert.notCalled(sidebar.guest.setVisibleHighlights);
+      assert.neverCalledWith(sidebarRPC().call, 'setHighlightsVisible');
     });
 
     it('updates the `sidebarOpen` property of the toolbar', () => {
@@ -560,7 +710,7 @@ describe('Sidebar', () => {
       sidebar.open();
       sidebar.close();
 
-      assert.calledWith(sidebar.guest.setVisibleHighlights, false);
+      assert.calledWith(sidebarRPC().call, 'setHighlightsVisible', false);
     });
 
     it('updates the `sidebarOpen` property of the toolbar', () => {
@@ -573,12 +723,35 @@ describe('Sidebar', () => {
     });
   });
 
-  describe('#setAllVisibleHighlights', () =>
-    it('sets the state through crossframe and emits', () => {
+  describe('#onFrameConnected', () => {
+    it('creates a channel to communicate with the guests', () => {
       const sidebar = createSidebar();
-      sidebar.setAllVisibleHighlights(true);
-      assert.calledWith(fakeCrossFrame.call, 'setVisibleHighlights', true);
-    }));
+      const { port1 } = new MessageChannel();
+      sidebar.onFrameConnected('guest', port1);
+
+      assert.calledWith(guestRPC().connect, port1);
+    });
+  });
+
+  describe('#setHighlightsVisible', () => {
+    it('requests sidebar to set highlight visibility in guest frames', () => {
+      const sidebar = createSidebar();
+      sidebar.setHighlightsVisible(true);
+      assert.calledWith(sidebarRPC().call, 'setHighlightsVisible', true);
+
+      sidebar.setHighlightsVisible(false);
+      assert.calledWith(sidebarRPC().call, 'setHighlightsVisible', false);
+    });
+
+    it('toggles "Show highlights" control in toolbar', () => {
+      const sidebar = createSidebar();
+      sidebar.setHighlightsVisible(true);
+      assert.isTrue(fakeToolbar.highlightsVisible);
+
+      sidebar.setHighlightsVisible(false);
+      assert.isFalse(fakeToolbar.highlightsVisible);
+    });
+  });
 
   it('hides toolbar controls when using the "clean" theme', () => {
     createSidebar({ theme: 'clean' });
@@ -591,19 +764,24 @@ describe('Sidebar', () => {
   });
 
   describe('window resize events', () => {
-    it('hides the sidebar if window width is < MIN_RESIZE', () => {
-      const sidebar = createSidebar({ openSidebar: true });
-      sidebar._emitter.publish('panelReady');
+    let sidebar;
 
+    beforeEach(async () => {
+      // Configure the sidebar to open on load and wait for the initial open to
+      // complete.
+      sidebar = createSidebar({ openSidebar: true });
+      connectSidebarApp();
+    });
+
+    it('hides the sidebar if window width is < MIN_RESIZE', () => {
       window.innerWidth = MIN_RESIZE - 1;
       window.dispatchEvent(new Event('resize'));
+
       assert.equal(fakeToolbar.sidebarOpen, false);
     });
 
     it('invokes the "open" method when window is resized', () => {
       // Calling the 'open' methods adjust the marginLeft at different screen sizes
-      const sidebar = createSidebar({ openSidebar: true });
-      sidebar._emitter.publish('panelReady');
       sinon.stub(sidebar, 'open');
 
       // Make the window very small
@@ -622,14 +800,14 @@ describe('Sidebar', () => {
     let layoutChangeHandlerSpy;
 
     const assertLayoutValues = (args, expectations) => {
-      const expected = Object.assign(
-        {
-          width: DEFAULT_WIDTH + fakeToolbar.getWidth(),
-          height: DEFAULT_HEIGHT,
-          expanded: true,
-        },
-        expectations
-      );
+      const expected = {
+        width: DEFAULT_WIDTH + fakeToolbar.getWidth(),
+        height: DEFAULT_HEIGHT,
+        expanded: true,
+        toolbarWidth: fakeToolbar.getWidth(),
+
+        ...expectations,
+      };
 
       assert.deepEqual(args, expected);
     };
@@ -642,7 +820,6 @@ describe('Sidebar', () => {
         layoutChangeHandlerSpy = sandbox.stub();
         sidebar = createSidebar({
           onLayoutChange: layoutChangeHandlerSpy,
-          sidebarAppUrl: '/',
         });
 
         // remove info about call that happens on creation of sidebar
@@ -669,48 +846,39 @@ describe('Sidebar', () => {
         frame.remove();
       });
 
-      it('notifies when sidebar changes expanded state', () => {
-        sinon.stub(sidebar._emitter, 'publish');
+      it('calls the "sidebarLayoutChanged" RPC method when sidebar changes expanded state', () => {
+        connectGuest(sidebar);
+        guestRPC().call.resetHistory();
         sidebar.open();
-        assert.calledOnce(layoutChangeHandlerSpy);
+        assert.calledOnce(guestRPC().call);
         assert.calledWith(
-          sidebar._emitter.publish,
+          guestRPC().call,
           'sidebarLayoutChanged',
           sinon.match.any
         );
-        assert.calledWith(sidebar._emitter.publish, 'sidebarOpened');
-        assert.calledTwice(sidebar._emitter.publish);
-        assertLayoutValues(layoutChangeHandlerSpy.lastCall.args[0], {
+        assertLayoutValues(guestRPC().call.lastCall.args[1], {
           expanded: true,
         });
 
         sidebar.close();
-        assert.calledTwice(layoutChangeHandlerSpy);
-        assert.calledThrice(sidebar._emitter.publish);
-        assertLayoutValues(layoutChangeHandlerSpy.lastCall.args[0], {
+        assert.calledTwice(guestRPC().call);
+        assertLayoutValues(guestRPC().call.lastCall.args[1], {
           expanded: false,
           width: fakeToolbar.getWidth(),
         });
       });
 
-      it('attempts to fit the content alongside the sidebar', () => {
-        fakeGuest.fitSideBySide.resetHistory();
+      it('notifies new guests of current sidebar layout', () => {
         sidebar.open();
+
+        connectGuest(sidebar);
+
         assert.calledWith(
-          fakeGuest.fitSideBySide,
+          guestRPC().call,
+          'sidebarLayoutChanged',
           sinon.match({
             expanded: true,
             width: DEFAULT_WIDTH + fakeToolbar.getWidth(),
-          })
-        );
-
-        fakeGuest.fitSideBySide.resetHistory();
-        sidebar.close();
-        assert.calledWith(
-          fakeGuest.fitSideBySide,
-          sinon.match({
-            expanded: false,
-            width: fakeToolbar.getWidth(),
           })
         );
       });
@@ -750,7 +918,6 @@ describe('Sidebar', () => {
         layoutChangeHandlerSpy = sandbox.stub();
         const layoutChangeExternalConfig = {
           onLayoutChange: layoutChangeHandlerSpy,
-          sidebarAppUrl: '/',
           externalContainerSelector: `.${EXTERNAL_CONTAINER_SELECTOR}`,
         };
         sidebar = createSidebar(layoutChangeExternalConfig);
@@ -769,6 +936,7 @@ describe('Sidebar', () => {
         assertLayoutValues(layoutChangeHandlerSpy.lastCall.args[0], {
           expanded: true,
           width: DEFAULT_WIDTH,
+          toolbarWidth: 0,
         });
 
         sidebar.close();
@@ -776,6 +944,7 @@ describe('Sidebar', () => {
         assertLayoutValues(layoutChangeHandlerSpy.lastCall.args[0], {
           expanded: false,
           width: 0,
+          toolbarWidth: 0,
         });
       });
 
@@ -838,24 +1007,45 @@ describe('Sidebar', () => {
       assert.isNull(sidebar.bucketBar);
     });
 
-    it('configures bucket bar to observe `contentContainer` scrolling if specified', () => {
-      const contentContainer = document.createElement('div');
-      fakeGuest.contentContainer.returns(contentContainer);
-
+    it('calls the "focusAnnotations" RPC method', () => {
       const sidebar = createSidebar();
+      connectGuest(sidebar);
+      const { onFocusAnnotations } = FakeBucketBar.getCall(0).args[1];
+      const tags = ['t1', 't2'];
+
+      onFocusAnnotations(tags);
+
+      assert.calledWith(guestRPC().call, 'focusAnnotations', tags);
+    });
+
+    it('calls the "scrollToClosestOffScreenAnchor" RPC method', () => {
+      const sidebar = createSidebar();
+      connectGuest(sidebar);
+      const { onScrollToClosestOffScreenAnchor } =
+        FakeBucketBar.getCall(0).args[1];
+      const tags = ['t1', 't2'];
+      const direction = 'down';
+
+      onScrollToClosestOffScreenAnchor(tags, direction);
 
       assert.calledWith(
-        FakeBucketBar,
-        sidebar.iframeContainer,
-        fakeGuest,
-        sinon.match({ contentContainer })
+        guestRPC().call,
+        'scrollToClosestOffScreenAnchor',
+        tags,
+        direction
       );
     });
 
-    it('updates the bucket bar when an `anchorsChanged` event is received', () => {
+    it('calls the "selectAnnotations" RPC method', () => {
       const sidebar = createSidebar();
-      sidebar._emitter.publish('anchorsChanged');
-      assert.calledOnce(sidebar.bucketBar.update);
+      connectGuest(sidebar);
+      const { onSelectAnnotations } = FakeBucketBar.getCall(0).args[1];
+      const tags = ['t1', 't2'];
+      const toggle = true;
+
+      onSelectAnnotations(tags, toggle);
+
+      assert.calledWith(guestRPC().call, 'selectAnnotations', tags, true);
     });
   });
 });

@@ -1,6 +1,10 @@
+import { render } from 'preact';
+import { act } from 'preact/test-utils';
+
 import * as annotationFixtures from '../../test/annotation-fixtures';
-import storeFactory from '../index';
-import immutable from '../../util/immutable';
+import { createSidebarStore, useSidebarStore } from '../index';
+import { immutable } from '../../util/immutable';
+import { ServiceContext } from '../../service-context';
 
 const defaultAnnotation = annotationFixtures.defaultAnnotation;
 const newAnnotation = annotationFixtures.newAnnotation;
@@ -16,7 +20,7 @@ const fixtures = immutable({
   ],
 });
 
-describe('store', function () {
+describe('createSidebarStore', () => {
   let store;
 
   function tagForID(id) {
@@ -27,23 +31,23 @@ describe('store', function () {
     return storeAnn.$tag;
   }
 
-  beforeEach(function () {
-    store = storeFactory({});
+  beforeEach(() => {
+    store = createSidebarStore({});
   });
 
-  describe('initialization', function () {
-    it('does not set a selection when settings.annotations is null', function () {
+  describe('initialization', () => {
+    it('does not set a selection when settings.annotations is null', () => {
       assert.isFalse(store.hasSelectedAnnotations());
       assert.equal(Object.keys(store.expandedMap()).length, 0);
     });
 
-    it('sets the selection when settings.annotations is set', function () {
-      store = storeFactory({ annotations: 'testid' });
+    it('sets the selection when settings.annotations is set', () => {
+      store = createSidebarStore({ annotations: 'testid' });
       assert.deepEqual(store.selectedAnnotations(), ['testid']);
     });
 
-    it('expands the selected annotations when settings.annotations is set', function () {
-      store = storeFactory({ annotations: 'testid' });
+    it('expands the selected annotations when settings.annotations is set', () => {
+      store = createSidebarStore({ annotations: 'testid' });
       assert.deepEqual(store.expandedMap(), {
         testid: true,
       });
@@ -93,35 +97,35 @@ describe('store', function () {
     });
   });
 
-  describe('#removeAnnotations()', function () {
-    it('removes annotations from the current state', function () {
+  describe('#removeAnnotations()', () => {
+    it('removes annotations from the current state', () => {
       const annot = defaultAnnotation();
       store.addAnnotations([annot]);
       store.removeAnnotations([annot]);
       assert.deepEqual(store.getState().annotations.annotations, []);
     });
 
-    it('matches annotations to remove by ID', function () {
+    it('matches annotations to remove by ID', () => {
       store.addAnnotations(fixtures.pair);
       store.removeAnnotations([{ id: fixtures.pair[0].id }]);
 
-      const ids = store.getState().annotations.annotations.map(function (a) {
+      const ids = store.getState().annotations.annotations.map(a => {
         return a.id;
       });
       assert.deepEqual(ids, [fixtures.pair[1].id]);
     });
 
-    it('matches annotations to remove by tag', function () {
+    it('matches annotations to remove by tag', () => {
       store.addAnnotations(fixtures.pair);
       store.removeAnnotations([{ $tag: fixtures.pair[0].$tag }]);
 
-      const tags = store.getState().annotations.annotations.map(function (a) {
+      const tags = store.getState().annotations.annotations.map(a => {
         return a.$tag;
       });
       assert.deepEqual(tags, [fixtures.pair[1].$tag]);
     });
 
-    it('switches back to the Annotations tab when the last orphan is removed', function () {
+    it('switches back to the Annotations tab when the last orphan is removed', () => {
       const orphan = Object.assign(defaultAnnotation(), { $orphan: true });
       store.addAnnotations([orphan]);
       store.selectTab('orphan');
@@ -130,8 +134,8 @@ describe('store', function () {
     });
   });
 
-  describe('#clearAnnotations()', function () {
-    it('removes all annotations', function () {
+  describe('#clearAnnotations()', () => {
+    it('removes all annotations', () => {
       const annot = defaultAnnotation();
       store.addAnnotations([annot]);
       store.clearAnnotations();
@@ -139,21 +143,54 @@ describe('store', function () {
     });
   });
 
-  describe('#setShowHighlights()', function () {
-    [{ state: true }, { state: false }].forEach(testCase => {
-      it(`sets the visibleHighlights state flag to ${testCase.state}`, () => {
-        store.setShowHighlights(testCase.state);
-        assert.equal(store.getState().viewer.visibleHighlights, testCase.state);
-      });
-    });
-  });
-
-  describe('#updatingAnchorStatus', function () {
-    it("updates the annotation's orphan flag", function () {
+  describe('#updatingAnchorStatus', () => {
+    it("updates the annotation's orphan flag", () => {
       const annot = defaultAnnotation();
       store.addAnnotations([annot]);
       store.updateAnchorStatus({ [tagForID(annot.id)]: 'orphan' });
       assert.equal(store.getState().annotations.annotations[0].$orphan, true);
     });
+  });
+});
+
+describe('useSidebarStore', () => {
+  function AnnotationCard({ id }) {
+    const store = useSidebarStore();
+    const ann = store.findAnnotationByID(id);
+    return <div>{ann.text}</div>;
+  }
+
+  // `useSidebarStore` is a trivial wrapper, so rather than mock its dependencies,
+  // this is a more useful integration test that covers interaction of the store
+  // and UI components.
+  it('returns wrapper for components to interact with store', () => {
+    const store = createSidebarStore({});
+    const annot = { ...defaultAnnotation(), text: 'Initial text' };
+    store.addAnnotations([annot]);
+
+    const services = {
+      get(service) {
+        return service === 'store' ? store : null;
+      },
+    };
+
+    const el = document.createElement('div');
+    act(() => {
+      render(
+        <ServiceContext.Provider value={services}>
+          <AnnotationCard id={annot.id} />
+        </ServiceContext.Provider>,
+        el
+      );
+    });
+    assert.equal(el.innerHTML, '<div>Initial text</div>');
+
+    act(() => {
+      const updatedAnnot = { ...annot, text: 'Updated text' };
+      store.addAnnotations([updatedAnnot]);
+    });
+    assert.equal(el.innerHTML, '<div>Updated text</div>');
+
+    render(null, el); // Force unmount and cleanup of subscribers
   });
 });

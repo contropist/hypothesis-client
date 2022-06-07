@@ -1,69 +1,110 @@
-/* global process */
-
-/**
- * @typedef {import('../types/annotator').HypothesisWindow} HypothesisWindow
- */
-
 // Load polyfill for :focus-visible pseudo-class.
 import 'focus-visible';
 
-// Enable debug checks for Preact components.
-if (process.env.NODE_ENV !== 'production') {
-  require('preact/debug');
-}
+// Enable debug checks for Preact. Removed in prod builds by Rollup config.
+import 'preact/debug';
 
 // Load icons.
 import { registerIcons } from '@hypothesis/frontend-shared';
-import iconSet from './icons';
-registerIcons(iconSet);
+import { annotatorIcons } from './icons';
+registerIcons(annotatorIcons);
 
-import configFrom from './config/index';
-import Guest from './guest';
-import Notebook from './notebook';
-import Sidebar from './sidebar';
+import {
+  PortProvider,
+  installPortCloseWorkaroundForSafari,
+} from '../shared/messaging';
+import { getConfig } from './config/index';
+import { Guest } from './guest';
+import { HypothesisInjector } from './hypothesis-injector';
+import {
+  VitalSourceInjector,
+  vitalSourceFrameRole,
+} from './integrations/vitalsource';
+import { Notebook } from './notebook';
+import { Sidebar } from './sidebar';
 import { EventBus } from './util/emitter';
 
-const window_ = /** @type {HypothesisWindow} */ (window);
+/** @typedef {import('../types/annotator').Destroyable} Destroyable */
 
 // Look up the URL of the sidebar. This element is added to the page by the
 // boot script before the "annotator" bundle loads.
-const appLinkEl = /** @type {Element} */ (document.querySelector(
-  'link[type="application/annotator+html"][rel="sidebar"]'
-));
+const sidebarLinkElement = /** @type {HTMLLinkElement} */ (
+  document.querySelector(
+    'link[type="application/annotator+html"][rel="sidebar"]'
+  )
+);
 
-const config = configFrom(window);
+/**
+ * @typedef {import('./components/NotebookModal').NotebookConfig} NotebookConfig
+ * @typedef {import('./guest').GuestConfig} GuestConfig
+ * @typedef {import('./hypothesis-injector').InjectConfig} InjectConfig
+ * @typedef {import('./sidebar').SidebarConfig} SidebarConfig
+ * @typedef {import('./sidebar').SidebarContainerConfig} SidebarContainerConfig
+ */
 
+/**
+ * Entry point for the part of the Hypothesis client that runs in the page being
+ * annotated.
+ *
+ * Depending on the client configuration in the current frame, this can
+ * initialize different functionality. In "host" frames the sidebar controls and
+ * iframe containing the sidebar application are created. In "guest" frames the
+ * functionality to support anchoring and creating annotations is loaded. An
+ * instance of Hypothesis will have one host frame, one sidebar frame and one or
+ * more guest frames. The most common case is that the host frame, where the
+ * client is initially loaded, is also the only guest frame.
+ */
 function init() {
-  const isPDF = typeof window_.PDFViewerApplication !== 'undefined';
+  const annotatorConfig = /** @type {GuestConfig & InjectConfig} */ (
+    getConfig('annotator')
+  );
 
-  if (config.subFrameIdentifier) {
-    // Other modules use this to detect if this
-    // frame context belongs to hypothesis.
-    // Needs to be a global property that's set.
-    window_.__hypothesis_frame = true;
+  const hostFrame = annotatorConfig.subFrameIdentifier ? window.parent : window;
+
+  /** @type {Destroyable[]} */
+  const destroyables = [];
+
+  if (hostFrame === window) {
+    // Ensure port "close" notifications from eg. guest frames are delivered properly.
+    const removeWorkaround = installPortCloseWorkaroundForSafari();
+    destroyables.push({ destroy: removeWorkaround });
+
+    const sidebarConfig = /** @type {SidebarConfig} */ (getConfig('sidebar'));
+
+    const hypothesisAppsOrigin = new URL(sidebarConfig.sidebarAppUrl).origin;
+    const portProvider = new PortProvider(hypothesisAppsOrigin);
+
+    const eventBus = new EventBus();
+    const sidebar = new Sidebar(document.body, eventBus, sidebarConfig);
+    const notebook = new Notebook(
+      document.body,
+      eventBus,
+      /** @type {NotebookConfig} */ (getConfig('notebook'))
+    );
+
+    portProvider.on('frameConnected', (source, port) =>
+      sidebar.onFrameConnected(source, port)
+    );
+    destroyables.push(portProvider, sidebar, notebook);
   }
 
-  // Load the PDF anchoring/metadata integration.
-  config.documentType = isPDF ? 'pdf' : 'html';
+  const vsFrameRole = vitalSourceFrameRole();
+  if (vsFrameRole === 'container') {
+    const vitalSourceInjector = new VitalSourceInjector(annotatorConfig);
+    destroyables.push(vitalSourceInjector);
+  } else {
+    // Set up automatic injection of the client into iframes in this frame.
+    const hypothesisInjector = new HypothesisInjector(
+      document.body,
+      annotatorConfig
+    );
+    // Create the guest that handles creating annotations and displaying highlights.
+    const guest = new Guest(document.body, annotatorConfig, hostFrame);
+    destroyables.push(hypothesisInjector, guest);
+  }
 
-  const eventBus = new EventBus();
-  const guest = new Guest(document.body, eventBus, config);
-  const sidebar = !config.subFrameIdentifier
-    ? new Sidebar(document.body, eventBus, guest, config)
-    : null;
-  // Clear `annotations` value from the notebook's config to prevent direct-linked
-  // annotations from filtering the threads.
-  //
-  // TODO: Refactor configFrom() so it can export application specific configs
-  // for different usages such as the notebook.
-  const notebookConfig = { ...config };
-  notebookConfig.annotations = null;
-  const notebook = new Notebook(document.body, eventBus, notebookConfig);
-
-  appLinkEl.addEventListener('destroy', () => {
-    sidebar?.destroy();
-    notebook.destroy();
-    guest.destroy();
+  sidebarLinkElement.addEventListener('destroy', () => {
+    destroyables.forEach(instance => instance.destroy());
 
     // Remove all the `<link>`, `<script>` and `<style>` elements added to the
     // page by the boot script.
@@ -75,7 +116,8 @@ function init() {
 /**
  * Returns a Promise that resolves when the document has loaded (but subresources
  * may still be loading).
- * @returns {Promise<void>}
+ *
+ * @return {Promise<void>}
  */
 function documentReady() {
   return new Promise(resolve => {

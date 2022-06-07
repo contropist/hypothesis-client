@@ -1,20 +1,13 @@
 import classnames from 'classnames';
 import {
-  SvgIcon,
+  Icon,
   normalizeKeyName,
   useElementShouldClose,
 } from '@hypothesis/frontend-shared';
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 
+import MenuArrow from './MenuArrow';
 import MenuKeyboardNavigation from './MenuKeyboardNavigation';
-
-// The triangular indicator below the menu toggle button that visually links it
-// to the menu content.
-const menuArrow = className => (
-  <svg className={classnames('Menu__arrow', className)} width={15} height={8}>
-    <path d="M0 8 L7 0 L15 8" stroke="currentColor" strokeWidth="2" />
-  </svg>
-);
 
 /**
  * Flag indicating whether the next click event on the menu's toggle button
@@ -32,8 +25,8 @@ let ignoreNextClick = false;
  *   Additional CSS class for the arrow caret at the edge of the menu content that "points"
  *   toward the menu's toggle button. This can be used to adjust the position of that caret
  *   respective to the toggle button.
- * @prop {Object|string} [label] - Label element for the toggle button that hides and shows the menu.
- * @prop {Object} [children] -
+ * @prop {object|string} [label] - Label element for the toggle button that hides and shows the menu.
+ * @prop {object} [children] -
  *   Menu items and sections to display in the content area of the menu.  These are typically
  *   `MenuSection` and `MenuItem` components, but other custom content is also allowed.
  * @prop {boolean} [containerPositioned] -
@@ -42,7 +35,7 @@ let ignoreNextClick = false;
  * @prop {string} [contentClass] - Additional CSS classes to apply to the menu.
  * @prop {boolean} [defaultOpen] - Whether the menu is open or closed when initially rendered.
  *   Ignored if `open` is present.
- * @prop {(open: boolean) => any} [onOpenChanged] - Callback invoked when the menu is
+ * @prop {(open: boolean) => void} [onOpenChanged] - Callback invoked when the menu is
  *   opened or closed.  This can be used, for example, to reset any ephemeral state that the
  *   menu content may have.
  * @prop {boolean} [open] - Whether the menu is currently open; overrides internal state
@@ -109,6 +102,7 @@ export default function Menu({
   // Toggle menu when user presses toggle button. The menu is shown on mouse
   // press for a more responsive/native feel but also handles a click event for
   // activation via other input methods.
+  /** @param {Event} event */
   const toggleMenu = event => {
     // If the menu was opened on press, don't close it again on the subsequent
     // mouse up ("click") event.
@@ -131,15 +125,17 @@ export default function Menu({
   //
   // These handlers close the menu when the user taps or clicks outside the
   // menu or presses Escape.
-  const menuRef = useRef(/** @type {HTMLDivElement|null} */ (null));
+  const menuRef = /** @type {{ current: HTMLDivElement }} */ (useRef());
 
   // Menu element should close via `closeMenu` whenever it's open and there
   // are user interactions outside of it (e.g. clicks) in the document
   useElementShouldClose(menuRef, isOpen, closeMenu);
 
+  /** @param {Event} e */
   const stopPropagation = e => e.stopPropagation();
 
   // It should also close if the user presses a key which activates menu items.
+  /** @param {KeyboardEvent} event */
   const handleMenuKeyDown = event => {
     const key = normalizeKeyName(event.key);
     if (key === 'Enter' || key === ' ') {
@@ -161,7 +157,8 @@ export default function Menu({
     // See https://github.com/evcohen/eslint-plugin-jsx-a11y/blob/master/docs/rules/no-static-element-interactions.md#case-the-event-handler-is-only-being-used-to-capture-bubbled-events
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
     <div
-      className="Menu"
+      className="relative"
+      data-testid="menu-container"
       ref={menuRef}
       // Add inline styles for positioning
       style={containerStyle}
@@ -176,7 +173,15 @@ export default function Menu({
       <button
         aria-expanded={isOpen ? 'true' : 'false'}
         aria-haspopup={true}
-        className="Menu__toggle"
+        className={classnames(
+          'u-outline-on-keyboard-focus',
+          'flex items-center justify-center rounded-sm transition-colors',
+          {
+            'text-grey-7 hover:text-grey-9': !isOpen,
+            'text-brand': isOpen,
+          }
+        )}
+        data-testid="menu-toggle-button"
         onMouseDown={toggleMenu}
         onClick={toggleMenu}
         aria-label={title}
@@ -184,27 +189,43 @@ export default function Menu({
       >
         <span
           // wrapper is needed to serve as the flex layout for the label and indicator content.
-          className="Menu__toggle-wrapper"
+          className="flex items-center gap-x-1"
         >
           {label}
           {menuIndicator && (
             <span
-              className={classnames('Menu__toggle-arrow', isOpen && 'is-open')}
+              className={classnames({
+                'rotate-180 text-color-text': isOpen,
+              })}
             >
-              <SvgIcon name="expand-menu" className="Menu__toggle-icon" />
+              <Icon name="expand-menu" classes="w-2.5 h-2.5" />
             </span>
           )}
         </span>
       </button>
       {isOpen && (
         <>
-          {menuArrow(arrowClass)}
+          <MenuArrow
+            direction="up"
+            classes={classnames(
+              // Position menu-arrow caret near bottom right of menu label/toggle control
+              'right-0 top-[calc(100%-6px)] w-[15px]',
+              arrowClass
+            )}
+          />
           <div
             className={classnames(
-              'Menu__content',
-              `Menu__content--align-${align}`,
+              'u-outline-on-keyboard-focus',
+              // Position menu content near bottom of menu label/toggle control
+              'absolute top-[calc(100%+5px)] z-1 border shadow',
+              'bg-white text-lg',
+              {
+                'left-0': align === 'left',
+                'right-0': align === 'right',
+              },
               contentClass
             )}
+            data-testid="menu-content"
             role="menu"
             tabIndex={-1}
             onClick={closeMenu}

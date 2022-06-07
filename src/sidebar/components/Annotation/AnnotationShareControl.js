@@ -1,8 +1,11 @@
 import {
+  Card,
   IconButton,
-  SvgIcon,
+  TextInput,
+  TextInputWithButton,
   useElementShouldClose,
 } from '@hypothesis/frontend-shared';
+import classnames from 'classnames';
 import { useEffect, useRef, useState } from 'preact/hooks';
 
 import { isShareableURI } from '../../helpers/annotation-sharing';
@@ -11,6 +14,7 @@ import { isPrivate } from '../../helpers/permissions';
 import { withServices } from '../../service-context';
 import { isIOS } from '../../../shared/user-agent';
 
+import MenuArrow from '../MenuArrow';
 import ShareLinks from '../ShareLinks';
 
 /**
@@ -121,7 +125,7 @@ function AnnotationShareControl({
   );
 
   return (
-    <div className="AnnotationShareControl" ref={shareRef}>
+    <div className="relative" ref={shareRef}>
       <IconButton
         icon="share"
         title="Share"
@@ -129,54 +133,67 @@ function AnnotationShareControl({
         expanded={isOpen}
       />
       {isOpen && (
-        <div className="annotation-share-panel">
-          <div className="annotation-share-panel__header">
-            <div className="annotation-share-panel__title">
+        <Card
+          classes={classnames(
+            // Prefer width 96 (24rem) but ensure that component isn't wider
+            // than 85vw
+            'w-96 max-w-[85vw]',
+            // Position this Card above its IconButton. Account for larger
+            // IconButtons in touch interfaces
+            'absolute bottom-8 right-1 touch:bottom-touch-minimum',
+            'space-y-2 p-2',
+            // Cards do not have a border in the clean theme. Turn it back on.
+            'theme-clean:border theme-clean:border-solid theme-clean:border-grey-3'
+          )}
+        >
+          <div className="flex items-center">
+            <h2 className="text-brand text-lg font-medium">
               Share this annotation
-            </div>
+            </h2>
           </div>
-          <div className="annotation-share-panel__content">
-            <div className="u-layout-row">
-              <input
+          <div
+            className={classnames(
+              // Slightly larger font size for touch devices to correspond with
+              // larger button and input sizes
+              'flex w-full text-sm touch:text-base'
+            )}
+          >
+            <TextInputWithButton>
+              <TextInput
                 aria-label="Use this URL to share this annotation"
-                className="annotation-share-panel__form-input"
                 type="text"
                 value={shareUri}
                 readOnly
-                ref={inputRef}
+                inputRef={inputRef}
               />
               <IconButton
-                className="InputButton"
                 icon="copy"
                 title="Copy share link to clipboard"
                 onClick={copyShareLink}
-                size="small"
+                variant="dark"
               />
-            </div>
+            </TextInputWithButton>
+          </div>
+          <div className="text-base font-normal" data-testid="share-details">
             {inContextAvailable ? (
-              <div className="annotation-share-panel__details">
-                {annotationSharingInfo}
-              </div>
+              <>{annotationSharingInfo}</>
             ) : (
-              <div className="annotation-share-panel__details">
+              <>
                 This annotation cannot be shared in its original context because
                 it was made on a document that is not available on the web. This
                 link shares the annotation by itself.
-              </div>
+              </>
             )}
-            {showShareLinks && <ShareLinks shareURI={shareUri} />}
           </div>
-          <SvgIcon
-            name="pointer"
-            inline={true}
-            className="annotation-share-panel__arrow"
+          {showShareLinks && <ShareLinks shareURI={shareUri} />}
+          <MenuArrow
+            direction="down"
+            classes="bottom-[-12px] right-1 touch:right-[9px]"
           />
-        </div>
+        </Card>
       )}
     </div>
   );
 }
 
-AnnotationShareControl.injectedProps = ['toastMessenger'];
-
-export default withServices(AnnotationShareControl);
+export default withServices(AnnotationShareControl, ['toastMessenger']);

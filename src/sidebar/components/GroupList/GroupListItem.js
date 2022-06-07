@@ -1,6 +1,8 @@
+import classnames from 'classnames';
+
 import { orgName } from '../../helpers/group-list-item-common';
 import { withServices } from '../../service-context';
-import { useStoreProxy } from '../../store/use-store';
+import { useSidebarStore } from '../../store';
 import { copyText } from '../../util/copy-to-clipboard';
 import { confirm } from '../../../shared/prompts';
 
@@ -14,9 +16,9 @@ import MenuItem from '../MenuItem';
  * @typedef GroupListItemProps
  * @prop {Group} group
  * @prop {boolean} [isExpanded] - Whether the submenu for this group is expanded
- * @prop {(expand: boolean) => any} onExpand -
+ * @prop {(expand: boolean) => void} onExpand -
  *   Callback invoked to expand or collapse the current group
- * @prop {Object} groups - Injected service
+ * @prop {import('../../services/groups').GroupsService} groups
  * @prop {import('../../services/toast-messenger').ToastMessengerService} toastMessenger
  */
 
@@ -40,7 +42,7 @@ function GroupListItem({
   const isSelectable =
     (group.scopes && !group.scopes.enforced) || group.isScopedToUri;
 
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const focusedGroupId = store.focusedGroupId();
   const isSelected = group.id === focusedGroupId;
 
@@ -139,7 +141,14 @@ function GroupListItem({
             )}
           </ul>
           {!isSelectable && (
-            <p className="GroupListItem__footer">
+            <p
+              className={classnames(
+                // Left padding to match submenu items above. Turn off hyphenation
+                // as it causes this content to hyphenate awkwardly.
+                'p-2 pl-9 bg-grey-1 hyphens-none'
+              )}
+              data-testid="unselectable-group-note"
+            >
               This group is restricted to specific URLs.
             </p>
           )}
@@ -149,6 +158,4 @@ function GroupListItem({
   );
 }
 
-GroupListItem.injectedProps = ['groups', 'toastMessenger'];
-
-export default withServices(GroupListItem);
+export default withServices(GroupListItem, ['groups', 'toastMessenger']);

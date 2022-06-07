@@ -1,21 +1,20 @@
-import { IconButton } from '@hypothesis/frontend-shared';
+import { IconButton, Panel } from '@hypothesis/frontend-shared';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import scrollIntoView from 'scroll-into-view';
 
 import { ResultSizeError } from '../search-client';
 import { withServices } from '../service-context';
-import { useStoreProxy } from '../store/use-store';
+import { useSidebarStore } from '../store';
 
 import NotebookFilters from './NotebookFilters';
 import NotebookResultCount from './NotebookResultCount';
-import Panel from './Panel';
 import PaginatedThreadList from './PaginatedThreadList';
-import useRootThread from './hooks/use-root-thread';
+import { useRootThread } from './hooks/use-root-thread';
 
 /**
  * @typedef NotebookViewProps
- * @prop {ReturnType<import('../services/load-annotations').default>} loadAnnotationsService - Injected service
- * @prop {import('../services/streamer').default} streamer - Injected service
+ * @prop {import('../services/load-annotations').LoadAnnotationsService} loadAnnotationsService
+ * @prop {import('../services/streamer').StreamerService} streamer
  */
 
 /**
@@ -24,7 +23,7 @@ import useRootThread from './hooks/use-root-thread';
  * @param {NotebookViewProps} props
  */
 function NotebookView({ loadAnnotationsService, streamer }) {
-  const store = useStoreProxy();
+  const store = useSidebarStore();
 
   const filters = store.getFilterValues();
   const focusedGroup = store.focusedGroup();
@@ -50,14 +49,14 @@ function NotebookView({ loadAnnotationsService, streamer }) {
   const lastPaginationPage = useRef(1);
   const [paginationPage, setPaginationPage] = useState(1);
 
-  const [hasTooManyAnnotationsError, setHasTooManyAnnotationsError] = useState(
-    false
-  );
+  const [hasTooManyAnnotationsError, setHasTooManyAnnotationsError] =
+    useState(false);
 
   // Load all annotations in the group, unless there are more than 5000
   // of them: this is a performance safety valve.
   const maxResults = 5000;
 
+  /** @param {Error} error */
   const onLoadError = error => {
     if (error instanceof ResultSizeError) {
       setHasTooManyAnnotationsError(true);
@@ -103,7 +102,7 @@ function NotebookView({ loadAnnotationsService, streamer }) {
     }
   }, [loadAnnotationsService, groupId, store]);
 
-  // Pagination-page-changing callback
+  /** @param {number} newPage */
   const onChangePage = newPage => {
     setPaginationPage(newPage);
   };
@@ -118,7 +117,9 @@ function NotebookView({ loadAnnotationsService, streamer }) {
   useLayoutEffect(() => {
     // TODO: Transition and effects here should be improved
     if (paginationPage !== lastPaginationPage.current) {
-      scrollIntoView(threadListScrollTop.current);
+      if (threadListScrollTop.current) {
+        scrollIntoView(threadListScrollTop.current);
+      }
       lastPaginationPage.current = paginationPage;
     }
   }, [paginationPage]);
@@ -128,14 +129,16 @@ function NotebookView({ loadAnnotationsService, streamer }) {
   }`;
 
   return (
-    <div className="NotebookView">
-      <header className="NotebookView__heading" ref={threadListScrollTop}>
-        <h1 className="NotebookView__group-name">{groupName}</h1>
+    <div className="grid gap-2 lg:grid-cols-2" data-testid="notebook-container">
+      <header className="leading-none lg:col-span-2" ref={threadListScrollTop}>
+        <h1 className="text-2xl font-bold" data-testid="notebook-group-name">
+          {groupName}
+        </h1>
       </header>
-      <div className="NotebookView__filters">
+      <div className="justify-self-start">
         <NotebookFilters />
       </div>
-      <div className="NotebookView__results u-layout-row--align-center u-font--large">
+      <div className="flex items-center lg:justify-self-end text-lg font-medium">
         {pendingUpdateCount > 0 && !hasAppliedFilter && (
           <IconButton
             icon="refresh"
@@ -148,12 +151,12 @@ function NotebookView({ loadAnnotationsService, streamer }) {
           forcedVisibleCount={forcedVisibleCount}
           isFiltered={hasAppliedFilter}
           isLoading={isLoading}
-          resultCount={resultCount}
+          resultCount={resultCount ?? 0}
         />
       </div>
-      <div className="NotebookView__items">
+      <div className="lg:col-span-2">
         {hasTooManyAnnotationsError && (
-          <div className="NotebookView__messages">
+          <div className="py-4" data-testid="notebook-messages">
             <Panel title="Too many results to show">
               This preview of the Notebook can show{' '}
               <strong>up to {maxResults} results</strong> at a time (there are{' '}
@@ -177,6 +180,7 @@ function NotebookView({ loadAnnotationsService, streamer }) {
   );
 }
 
-NotebookView.injectedProps = ['loadAnnotationsService', 'streamer'];
-
-export default withServices(NotebookView);
+export default withServices(NotebookView, [
+  'loadAnnotationsService',
+  'streamer',
+]);

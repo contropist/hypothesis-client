@@ -1,4 +1,4 @@
-import buildThread from '../build-thread';
+import { buildThread } from '../build-thread';
 import * as metadata from '../../helpers/annotation-metadata';
 
 // Fixture with two top level annotations, one note and one reply
@@ -38,9 +38,9 @@ const defaultBuildThreadOpts = {
  */
 function filter(thread, keys) {
   const result = {};
-  keys.forEach(function (key) {
+  keys.forEach(key => {
     if (key === 'children') {
-      result[key] = thread[key].map(function (child) {
+      result[key] = thread[key].map(child => {
         return filter(child, keys);
       });
     } else {
@@ -55,7 +55,7 @@ function filter(thread, keys) {
  * which do not match `keys`.
  *
  * @param {Array<Annotation>} fixture - List of annotations to thread
- * @param {Object?} opts - Options to pass to buildThread()
+ * @param {object?} opts - Options to pass to buildThread()
  * @param {Array<string>?} keys - List of keys to keep in the output
  */
 function createThread(fixture, options, keys) {

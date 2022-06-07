@@ -1,4 +1,4 @@
-import fakeReduxStore from '../../test/fake-redux-store';
+import { fakeReduxStore } from '../../test/fake-redux-store';
 import { PersistedDefaultsService } from '../persisted-defaults';
 
 const DEFAULT_KEYS = {
@@ -126,12 +126,12 @@ describe('PersistedDefaultsService', () => {
         const defaults = { focusedGroup: 'carrots' };
         fakeLocalStorage.getItem.returns('carrots');
         fakeStore.getDefaults.returns(defaults);
-        fakeStore.setState({ defaults: defaults });
+        fakeStore.setState({ defaults });
         const svc = createService();
         svc.init();
 
         fakeStore.getDefaults.returns(defaults);
-        fakeStore.setState({ defaults: defaults });
+        fakeStore.setState({ defaults });
 
         assert.notCalled(fakeLocalStorage.setItem);
       });

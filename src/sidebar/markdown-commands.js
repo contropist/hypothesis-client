@@ -173,6 +173,12 @@ export function toggleSpanStyle(state, prefix, suffix, placeholder) {
   return newState;
 }
 
+/**
+ * Find the nearest line beginning searching backwards from `pos`.
+ *
+ * @param {string} str
+ * @param {number} pos
+ */
 function startOfLine(str, pos) {
   const start = str.lastIndexOf('\n', pos);
   if (start < 0) {
@@ -182,6 +188,12 @@ function startOfLine(str, pos) {
   }
 }
 
+/**
+ * Find the nearest line ending searching forwards from `pos`.
+ *
+ * @param {string} str
+ * @param {number} pos
+ */
 function endOfLine(str, pos) {
   const end = str.indexOf('\n', pos);
   if (end < 0) {
@@ -238,7 +250,7 @@ export function toggleBlockStyle(state, prefix) {
   // Test whether all lines in the selected range already have the style
   // applied
   let blockHasStyle = true;
-  transformLines(state, start, end, function (state, lineStart) {
+  transformLines(state, start, end, (state, lineStart) => {
     if (state.text.slice(lineStart, lineStart + prefix.length) !== prefix) {
       blockHasStyle = false;
     }
@@ -247,12 +259,12 @@ export function toggleBlockStyle(state, prefix) {
 
   if (blockHasStyle) {
     // Remove the formatting.
-    return transformLines(state, start, end, function (state, lineStart) {
+    return transformLines(state, start, end, (state, lineStart) => {
       return replaceText(state, lineStart, prefix.length, '');
     });
   } else {
     // Add the block style to any lines which do not already have it applied
-    return transformLines(state, start, end, function (state, lineStart) {
+    return transformLines(state, start, end, (state, lineStart) => {
       if (state.text.slice(lineStart, lineStart + prefix.length) === prefix) {
         return state;
       } else {

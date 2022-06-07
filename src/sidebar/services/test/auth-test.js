@@ -1,11 +1,11 @@
 import { Injector } from '../../../shared/injector';
-import FakeWindow from '../../test/fake-window';
+import { FakeWindow } from '../../test/fake-window';
 import { AuthService, $imports } from '../auth';
 
 const DEFAULT_TOKEN_EXPIRES_IN_SECS = 1000;
 const TOKEN_KEY = 'hypothesis.oauth.hypothes%2Eis.token';
 
-describe('AuthService', function () {
+describe('AuthService', () => {
   let FakeOAuthClient;
   let auth;
   let nowStub;
@@ -32,7 +32,7 @@ describe('AuthService', function () {
     return auth.login();
   }
 
-  beforeEach(function () {
+  beforeEach(() => {
     // Setup fake clock. This has to be done before setting up the `window`
     // fake which makes use of timers.
     clock = sinon.useFakeTimers();
@@ -82,12 +82,11 @@ describe('AuthService', function () {
       fakeClient.config = config;
       return fakeClient;
     };
-    FakeOAuthClient.openAuthPopupWindow = sinon.stub();
 
     fakeWindow = new FakeWindow();
 
     $imports.$mock({
-      '../util/oauth-client': FakeOAuthClient,
+      '../util/oauth-client': { OAuthClient: FakeOAuthClient },
     });
 
     auth = new Injector()
@@ -100,7 +99,7 @@ describe('AuthService', function () {
       .get('auth');
   });
 
-  afterEach(function () {
+  afterEach(() => {
     $imports.$restore();
 
     performance.now.restore();
@@ -119,14 +118,14 @@ describe('AuthService', function () {
     });
   });
 
-  describe('#getAccessToken', function () {
+  describe('#getAccessToken', () => {
     const successfulTokenResponse = Promise.resolve({
       accessToken: 'firstAccessToken',
       refreshToken: 'firstRefreshToken',
       expiresAt: 100,
     });
 
-    it('exchanges the grant token for an access token if provided', function () {
+    it('exchanges the grant token for an access token if provided', () => {
       fakeClient.exchangeGrantToken.returns(successfulTokenResponse);
 
       return auth.getAccessToken().then(token => {
@@ -135,9 +134,9 @@ describe('AuthService', function () {
       });
     });
 
-    context('when the access token request fails', function () {
+    context('when the access token request fails', () => {
       const expectedErr = new Error('Grant token exchange failed');
-      beforeEach('make access token requests fail', function () {
+      beforeEach('make access token requests fail', () => {
         fakeClient.exchangeGrantToken.returns(Promise.reject(expectedErr));
       });
 
@@ -147,8 +146,8 @@ describe('AuthService', function () {
         }, func);
       }
 
-      it('shows an error message to the user', function () {
-        return assertThatAccessTokenPromiseWasRejectedAnd(function () {
+      it('shows an error message to the user', () => {
+        return assertThatAccessTokenPromiseWasRejectedAnd(() => {
           assert.calledOnce(fakeToastMessenger.error);
           assert.calledWith(
             fakeToastMessenger.error,
@@ -160,22 +159,22 @@ describe('AuthService', function () {
         });
       });
 
-      it('returns a rejected promise', function () {
+      it('returns a rejected promise', () => {
         return assertThatAccessTokenPromiseWasRejectedAnd(err => {
           assert.equal(err.message, expectedErr.message);
         });
       });
     });
 
-    it('should cache tokens for future use', function () {
+    it('should cache tokens for future use', () => {
       fakeClient.exchangeGrantToken.returns(successfulTokenResponse);
       return auth
         .getAccessToken()
-        .then(function () {
+        .then(() => {
           fakeClient.exchangeGrantToken.reset();
           return auth.getAccessToken();
         })
-        .then(function (token) {
+        .then(token => {
           assert.equal(token, 'firstAccessToken');
           assert.notCalled(fakeClient.exchangeGrantToken);
         });
@@ -185,7 +184,7 @@ describe('AuthService', function () {
     // flight when getAccessToken() is called again, then it should just return
     // the pending Promise for the first request again (and not send a second
     // concurrent HTTP request).
-    it('should not make two concurrent access token requests', function () {
+    it('should not make two concurrent access token requests', () => {
       let respond;
       fakeClient.exchangeGrantToken.returns(
         new Promise(resolve => {
@@ -208,15 +207,15 @@ describe('AuthService', function () {
       });
     });
 
-    it('should not attempt to exchange a grant token if none was provided', function () {
+    it('should not attempt to exchange a grant token if none was provided', () => {
       fakeSettings.services = [{ authority: 'publisher.org' }];
-      return auth.getAccessToken().then(function (token) {
+      return auth.getAccessToken().then(token => {
         assert.notCalled(fakeClient.exchangeGrantToken);
         assert.equal(token, null);
       });
     });
 
-    it('should refresh the access token if it expired', function () {
+    it('should refresh the access token if it expired', () => {
       fakeClient.exchangeGrantToken.returns(
         Promise.resolve(successfulTokenResponse)
       );
@@ -250,7 +249,7 @@ describe('AuthService', function () {
 
     // It only sends one refresh request, even if getAccessToken() is called
     // multiple times and the refresh response hasn't come back yet.
-    it('does not send more than one refresh request', function () {
+    it('does not send more than one refresh request', () => {
       fakeClient.exchangeGrantToken.returns(
         Promise.resolve(successfulTokenResponse)
       );
@@ -291,13 +290,13 @@ describe('AuthService', function () {
         });
     });
 
-    context('when a refresh request fails', function () {
-      beforeEach('make refresh token requests fail', function () {
+    context('when a refresh request fails', () => {
+      beforeEach('make refresh token requests fail', () => {
         fakeClient.refreshToken.returns(Promise.reject(new Error('failed')));
         fakeClient.exchangeGrantToken.returns(successfulTokenResponse);
       });
 
-      it('logs the user out', function () {
+      it('logs the user out', () => {
         expireAccessToken();
 
         return auth.getAccessToken(token => {
@@ -530,12 +529,9 @@ describe('AuthService', function () {
       fakeSettings.services = [];
     });
 
-    it('calls OAuthClient#authorize', () => {
-      const fakePopup = {};
-      FakeOAuthClient.openAuthPopupWindow.returns(fakePopup);
-      return auth.login().then(() => {
-        assert.calledWith(fakeClient.authorize, fakeWindow, fakePopup);
-      });
+    it('calls OAuthClient#authorize', async () => {
+      await auth.login();
+      assert.calledWith(fakeClient.authorize, fakeWindow);
     });
 
     it('resolves when auth completes successfully', () => {

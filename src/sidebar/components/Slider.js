@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 
 /**
  * @typedef SliderProps
- * @prop {Object} [children] - The slideable content to hide or reveal.
+ * @prop {object} [children] - The slideable content to hide or reveal.
  * @prop {boolean} visible - Whether the content should be visible or not.
  */
 
@@ -19,7 +19,7 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
  * @param {SliderProps} props
  */
 export default function Slider({ children, visible }) {
-  const containerRef = useRef(null);
+  const containerRef = /** @type {{ current: HTMLDivElement }} */ (useRef());
   const [containerHeight, setContainerHeight] = useState(visible ? 'auto' : 0);
 
   // Whether the content is currently partially or wholly visible. This is

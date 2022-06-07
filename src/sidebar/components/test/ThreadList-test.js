@@ -5,11 +5,10 @@ import ThreadList from '../ThreadList';
 import { $imports } from '../ThreadList';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
 describe('ThreadList', () => {
   let fakeDomUtil;
-  let fakeMetadata;
   let fakeTopThread;
   let fakeScrollContainer;
   let fakeStore;
@@ -31,9 +30,6 @@ describe('ThreadList', () => {
     wrappers = [];
     fakeDomUtil = {
       getElementHeightWithMargins: sinon.stub().returns(0),
-    };
-    fakeMetadata = {
-      isHighlight: sinon.stub().returns(false),
     };
 
     fakeScrollContainer = document.createElement('div');
@@ -70,14 +66,15 @@ describe('ThreadList', () => {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      '../store/use-store': { useStoreProxy: () => fakeStore },
-      '../helpers/annotation-metadata': fakeMetadata,
+      '../store': { useSidebarStore: () => fakeStore },
       '../util/dom': fakeDomUtil,
       '../helpers/visible-threads': fakeVisibleThreadsUtil,
     });
+    sinon.stub(console, 'warn');
   });
 
   afterEach(() => {
+    console.warn.restore();
     $imports.$restore();
     // Make sure all mounted components are unmounted
     wrappers.forEach(wrapper => wrapper.unmount());
@@ -259,7 +256,7 @@ describe('ThreadList', () => {
 
       // Calculate expected total height of thread list contents.
       const getRect = wrapper => wrapper.getDOMNode().getBoundingClientRect();
-      const cards = wrapper.find('.ThreadList__card');
+      const cards = wrapper.find('[data-testid="thread-card-container"]');
       const spaceBelowEachCard =
         getRect(cards.at(1)).top - getRect(cards.at(0)).bottom;
       const totalThreadHeight = fakeTopThread.children.reduce(
@@ -303,6 +300,17 @@ describe('ThreadList', () => {
     const wrapper = createComponent();
     const cards = wrapper.find('ThreadCard');
     assert.equal(cards.length, fakeTopThread.children.length);
+  });
+
+  it('does not error if thread heights cannot be measured', () => {
+    // Render the `ThreadList` unconnected to a document. This will prevent
+    // it from being able to measure the height of rendered threads.
+    const wrapper = mount(<ThreadList threads={fakeTopThread.children} />);
+    wrappers.push(wrapper);
+    assert.calledWith(
+      console.warn,
+      'ThreadList could not measure thread. Element not found.'
+    );
   });
 
   it(

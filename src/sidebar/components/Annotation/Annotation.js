@@ -1,7 +1,15 @@
+import { Actions, Spinner } from '@hypothesis/frontend-shared';
 import classnames from 'classnames';
+import { useMemo } from 'preact/hooks';
 
-import { useStoreProxy } from '../../store/use-store';
-import { quote } from '../../helpers/annotation-metadata';
+import { useSidebarStore } from '../../store';
+import {
+  annotationRole,
+  isOrphan,
+  isSaved,
+  quote,
+} from '../../helpers/annotation-metadata';
+import { annotationDisplayName } from '../../helpers/annotation-user';
 import { withServices } from '../../service-context';
 
 import AnnotationActionBar from './AnnotationActionBar';
@@ -13,22 +21,43 @@ import AnnotationReplyToggle from './AnnotationReplyToggle';
 
 /**
  * @typedef {import("../../../types/api").Annotation} Annotation
- * @typedef {import('../../../types/api').Group} Group
  */
 
 /**
  * @typedef AnnotationProps
- * @prop {Annotation} [annotation] - The annotation to render. If undefined,
- *   this Annotation will render as a "missing annotation" and will stand in
- *   as an Annotation for threads that lack an annotation.
- * @prop {boolean} hasAppliedFilter - Is any filter applied currently?
+ * @prop {Annotation} annotation
  * @prop {boolean} isReply
- * @prop {VoidFunction} onToggleReplies - Callback to expand/collapse reply threads
+ * @prop {VoidFunction} [onToggleReplies] - Callback to expand/collapse reply
+ *   threads. The presence of a function indicates a toggle should be rendered.
  * @prop {number} replyCount - Number of replies to this annotation's thread
  * @prop {boolean} threadIsCollapsed - Is the thread to which this annotation belongs currently collapsed?
  * @prop {import('../../services/annotations').AnnotationsService} annotationsService
  */
 
+function SavingMessage() {
+  return (
+    <div
+      className={classnames(
+        'flex grow justify-end items-center gap-x-1',
+        // Make sure height matches that of action-bar icons so that there
+        // isn't a height change when transitioning in and out of saving state
+        'h-8 touch:h-touch-minimum'
+      )}
+      data-testid="saving-message"
+    >
+      <Spinner
+        classes={classnames(
+          'text-xl',
+          // Slowly fade in the Spinner such that it only shows up if
+          // the saving is slow
+          'animate-fade-in-slow'
+        )}
+        size="small"
+      />
+      <div className="text-color-text-light font-medium">Saving...</div>
+    </div>
+  );
+}
 /**
  * A single annotation.
  *
@@ -36,90 +65,82 @@ import AnnotationReplyToggle from './AnnotationReplyToggle';
  */
 function Annotation({
   annotation,
-  hasAppliedFilter,
   isReply,
   onToggleReplies,
   replyCount,
   threadIsCollapsed,
   annotationsService,
 }) {
+  const store = useSidebarStore();
+
+  const annotationQuote = quote(annotation);
+  const draft = store.getDraft(annotation);
+  const userid = store.profile().userid;
+
+  const isFocused = store.isAnnotationFocused(annotation.$tag);
+  const isSaving = store.isSavingAnnotation(annotation);
+
+  const isEditing = !!draft && !isSaving;
   const isCollapsedReply = isReply && threadIsCollapsed;
 
-  const store = useStoreProxy();
+  const showActions = !isSaving && !isEditing && isSaved(annotation);
 
-  const hasQuote = annotation && !!quote(annotation);
-  const isFocused = annotation && store.isAnnotationFocused(annotation.$tag);
-  const isSaving = annotation && store.isSavingAnnotation(annotation);
-  const isEditing = annotation && !!store.getDraft(annotation) && !isSaving;
+  const onReply = () => {
+    if (isSaved(annotation) && userid) {
+      annotationsService.reply(annotation, userid);
+    }
+  };
 
-  const userid = store.profile().userid;
-  const showActions = annotation && !isSaving && !isEditing;
-  const showReplyToggle = !isReply && !hasAppliedFilter && replyCount > 0;
-
-  const onReply = () => annotationsService.reply(annotation, userid);
+  const authorName = useMemo(
+    () => annotationDisplayName(annotation, store),
+    [annotation, store]
+  );
 
   return (
     <article
-      className={classnames('Annotation', {
-        'Annotation--missing': !annotation,
-        'Annotation--reply': isReply,
-        'is-collapsed': threadIsCollapsed,
-        'is-focused': isFocused,
-      })}
+      className="space-y-4"
+      aria-label={`${annotationRole(annotation)} by ${authorName}`}
     >
-      {annotation && (
-        <>
-          <AnnotationHeader
-            annotation={annotation}
-            isEditing={isEditing}
-            replyCount={replyCount}
-            threadIsCollapsed={threadIsCollapsed}
-          />
+      <AnnotationHeader
+        annotation={annotation}
+        isEditing={isEditing}
+        replyCount={replyCount}
+        threadIsCollapsed={threadIsCollapsed}
+      />
 
-          {hasQuote && (
-            <AnnotationQuote annotation={annotation} isFocused={isFocused} />
-          )}
-
-          {!isCollapsedReply && !isEditing && (
-            <AnnotationBody annotation={annotation} />
-          )}
-
-          {isEditing && <AnnotationEditor annotation={annotation} />}
-        </>
+      {annotationQuote && (
+        <AnnotationQuote
+          quote={annotationQuote}
+          isFocused={isFocused}
+          isOrphan={isOrphan(annotation)}
+        />
       )}
 
-      {!annotation && !isCollapsedReply && (
-        <div>
-          <em>Message not available.</em>
-        </div>
+      {!isCollapsedReply && !isEditing && (
+        <AnnotationBody annotation={annotation} />
       )}
+
+      {isEditing && <AnnotationEditor annotation={annotation} draft={draft} />}
 
       {!isCollapsedReply && (
-        <footer className="Annotation__footer">
-          <div className="Annotation__controls u-layout-row">
-            {showReplyToggle && (
-              <AnnotationReplyToggle
-                onToggleReplies={onToggleReplies}
-                replyCount={replyCount}
-                threadIsCollapsed={threadIsCollapsed}
-              />
-            )}
-            {isSaving && <div className="Annotation__actions">Saving...</div>}
-            {showActions && (
-              <div className="u-layout-row--justify-right u-stretch">
-                <AnnotationActionBar
-                  annotation={annotation}
-                  onReply={onReply}
-                />
-              </div>
-            )}
-          </div>
+        <footer className="flex items-center">
+          {onToggleReplies && (
+            <AnnotationReplyToggle
+              onToggleReplies={onToggleReplies}
+              replyCount={replyCount}
+              threadIsCollapsed={threadIsCollapsed}
+            />
+          )}
+          {isSaving && <SavingMessage />}
+          {showActions && (
+            <Actions classes="grow">
+              <AnnotationActionBar annotation={annotation} onReply={onReply} />
+            </Actions>
+          )}
         </footer>
       )}
     </article>
   );
 }
 
-Annotation.injectedProps = ['annotationsService'];
-
-export default withServices(Annotation);
+export default withServices(Annotation, ['annotationsService']);

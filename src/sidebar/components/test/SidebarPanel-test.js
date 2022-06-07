@@ -1,10 +1,9 @@
 import { mount } from 'enzyme';
 
-import SidebarPanel from '../SidebarPanel';
-import { $imports } from '../SidebarPanel';
+import SidebarPanel, { $imports } from '../SidebarPanel';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
 describe('SidebarPanel', () => {
   let fakeStore;
@@ -17,18 +16,13 @@ describe('SidebarPanel', () => {
     fakeScrollIntoView = sinon.stub();
 
     fakeStore = {
-      getState: sinon.stub().returns({
-        sidebarPanels: {
-          activePanelName: null,
-        },
-      }),
       isSidebarPanelOpen: sinon.stub().returns(false),
       toggleSidebarPanel: sinon.stub(),
     };
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      '../store': { useSidebarStore: () => fakeStore },
       'scroll-into-view': fakeScrollIntoView,
     });
   });

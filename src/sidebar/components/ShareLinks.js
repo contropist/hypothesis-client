@@ -1,6 +1,4 @@
-import { SvgIcon } from '@hypothesis/frontend-shared';
-
-import { withServices } from '../service-context';
+import { Icon, Link } from '@hypothesis/frontend-shared';
 
 /**
  * @typedef ShareLinkProps
@@ -16,16 +14,16 @@ import { withServices } from '../service-context';
  */
 function ShareLink({ label, iconName, uri }) {
   return (
-    <li className="ShareLinks__link">
-      <a
+    <li>
+      <Link
         aria-label={label}
+        classes="text-grey-6 hover:text-color-text block"
         href={uri}
         title={label}
         target="_blank"
-        rel="noopener noreferrer"
       >
-        <SvgIcon name={iconName} className="ShareLinks__icon" />
-      </a>
+        <Icon name={iconName} />
+      </Link>
     </li>
   );
 }
@@ -37,14 +35,16 @@ function ShareLink({ label, iconName, uri }) {
 
 /**
  * A list of share links to social-media platforms.
+ *
+ * @param {ShareLinksProps} props
  */
-function ShareLinks({ shareURI }) {
+export default function ShareLinks({ shareURI }) {
   // This is the double-encoded format needed for other services (the entire
   // URI needs to be encoded because it's used as the value of querystring params)
   const encodedURI = encodeURIComponent(shareURI);
 
   return (
-    <ul className="ShareLinks">
+    <ul className="flex flex-row gap-x-4 items-center justify-center border-t pt-2">
       <ShareLink
         iconName="twitter"
         label="Tweet share link"
@@ -67,5 +67,3 @@ function ShareLinks({ shareURI }) {
     </ul>
   );
 }
-
-export default withServices(ShareLinks);

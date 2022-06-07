@@ -1,20 +1,9 @@
-import serviceConfig from '../config/service-config';
+import { serviceConfig } from '../config/service-config';
 
 /**
- * @typedef {import('../../types/config').HostConfig} HostConfig
+ * @typedef {import('../../types/config').SidebarSettings} SidebarSettings
  * @typedef {import('../../types/api').Profile} Profile
  */
-
-/**
- * Returns true if the sidebar tutorial has to be shown to a user for a given session.
- * @deprecated To be removed once preact help/tutorial panel is in place
- */
-export function shouldShowSidebarTutorial(sessionState) {
-  if (sessionState.preferences.show_sidebar_tutorial) {
-    return true;
-  }
-  return false;
-}
 
 /**
  * The following things must all be true for the tutorial component to auto-display
@@ -31,7 +20,7 @@ export function shouldShowSidebarTutorial(sessionState) {
  *
  * @param {boolean} isSidebar - is the app currently displayed in a sidebar?
  * @param {Profile} profile - User profile returned from the API
- * @param {HostConfig} settings
+ * @param {SidebarSettings} settings
  * @return {boolean} - Tutorial panel should be displayed automatically
  */
 export function shouldAutoDisplayTutorial(isSidebar, profile, settings) {

@@ -3,14 +3,14 @@ import { mount } from 'enzyme';
 import * as fixtures from '../../../test/annotation-fixtures';
 
 import { checkAccessibility } from '../../../../test-util/accessibility';
-import mockImportedComponents from '../../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../../test-util/mock-imported-components';
 
 import AnnotationHeader, { $imports } from '../AnnotationHeader';
 
 describe('AnnotationHeader', () => {
-  let fakeAccountId;
-  let fakeAnnotationDisplayName;
+  let fakeAnnotationAuthorInfo;
   let fakeDomainAndTitle;
+  let fakeGroup;
   let fakeIsHighlight;
   let fakeIsReply;
   let fakeHasBeenEdited;
@@ -33,32 +33,34 @@ describe('AnnotationHeader', () => {
 
   beforeEach(() => {
     fakeDomainAndTitle = sinon.stub().returns({});
+    fakeGroup = {
+      name: 'My Group',
+      links: {
+        html: 'https://www.example.com',
+      },
+      type: 'private',
+    };
     fakeIsHighlight = sinon.stub().returns(false);
     fakeIsReply = sinon.stub().returns(false);
     fakeHasBeenEdited = sinon.stub().returns(false);
     fakeIsPrivate = sinon.stub();
 
-    fakeAccountId = {
-      isThirdPartyUser: sinon.stub().returns(false),
-      username: sinon.stub().returnsArg(0),
-    };
-
-    fakeAnnotationDisplayName = sinon.stub().returns('Robbie Burns');
+    fakeAnnotationAuthorInfo = sinon.stub().returns({
+      authorDisplayName: 'Robbie Burns',
+      authorLink: 'http://www.example.com',
+    });
 
     fakeSettings = { usernameUrl: 'http://foo.bar/' };
 
     fakeStore = {
-      defaultAuthority: sinon.stub().returns('foo.com'),
-      getLink: sinon.stub().returns('http://example.com'),
-      isFeatureEnabled: sinon.stub().returns(false),
+      getGroup: sinon.stub().returns(fakeGroup),
       route: sinon.stub().returns('sidebar'),
       setExpanded: sinon.stub(),
     };
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      '../../store/use-store': { useStoreProxy: () => fakeStore },
-      '../../helpers/account-id': fakeAccountId,
+      '../../store': { useSidebarStore: () => fakeStore },
       '../../helpers/annotation-metadata': {
         domainAndTitle: fakeDomainAndTitle,
         isHighlight: fakeIsHighlight,
@@ -66,7 +68,7 @@ describe('AnnotationHeader', () => {
         hasBeenEdited: fakeHasBeenEdited,
       },
       '../../helpers/annotation-user': {
-        annotationDisplayName: fakeAnnotationDisplayName,
+        annotationAuthorInfo: fakeAnnotationAuthorInfo,
       },
       '../../helpers/permissions': {
         isPrivate: fakeIsPrivate,
@@ -84,7 +86,7 @@ describe('AnnotationHeader', () => {
 
       const wrapper = createAnnotationHeader();
 
-      assert.isTrue(wrapper.find('SvgIcon').filter({ name: 'lock' }).exists());
+      assert.isTrue(wrapper.find('Icon').filter({ name: 'lock' }).exists());
     });
 
     it('should not render an "Only Me" icon if the annotation is being edited', () => {
@@ -92,7 +94,7 @@ describe('AnnotationHeader', () => {
 
       const wrapper = createAnnotationHeader({ isEditing: true });
 
-      assert.isFalse(wrapper.find('SvgIcon').filter({ name: 'lock' }).exists());
+      assert.isFalse(wrapper.find('Icon').filter({ name: 'lock' }).exists());
     });
 
     it('should not render an "Only Me" icon if the annotation is not private', () => {
@@ -100,38 +102,27 @@ describe('AnnotationHeader', () => {
 
       const wrapper = createAnnotationHeader();
 
-      assert.isFalse(wrapper.find('SvgIcon').filter({ name: 'lock' }).exists());
+      assert.isFalse(wrapper.find('Icon').filter({ name: 'lock' }).exists());
     });
   });
 
   describe('annotation author (user) information', () => {
-    it('should link to author activity if first-party', () => {
-      fakeAccountId.isThirdPartyUser.returns(false);
-
+    it('should link to author activity if link available', () => {
       const wrapper = createAnnotationHeader();
 
       assert.equal(
         wrapper.find('AnnotationUser').props().authorLink,
-        'http://example.com'
+        'http://www.example.com'
       );
     });
 
-    it('should link to author activity if third-party and has settings URL', () => {
-      fakeAccountId.isThirdPartyUser.returns(true);
-      const fakeAnnotation = fixtures.defaultAnnotation();
+    it('should not link to author if none provided', () => {
+      fakeAnnotationAuthorInfo.returns({
+        authorDisplayName: 'Robbie Burns',
+        authorLink: undefined,
+      });
 
-      const wrapper = createAnnotationHeader({ annotation: fakeAnnotation });
-
-      assert.equal(
-        wrapper.find('AnnotationUser').props().authorLink,
-        `http://foo.bar/${fakeAnnotation.user}`
-      );
-    });
-
-    it('should not link to author if third-party and no settings URL', () => {
-      fakeAccountId.isThirdPartyUser.returns(true);
-
-      const wrapper = createAnnotationHeader({ settings: {} });
+      const wrapper = createAnnotationHeader();
 
       assert.isUndefined(wrapper.find('AnnotationUser').props().authorLink);
     });
@@ -249,7 +240,7 @@ describe('AnnotationHeader', () => {
       fakeHasBeenEdited.returns(true);
 
       const wrapper = createAnnotationHeader({
-        annotation: annotation,
+        annotation,
       });
       const timestamp = wrapper.find('AnnotationTimestamps');
       assert.equal(timestamp.props().withEditedTimestamp, true);
@@ -272,7 +263,7 @@ describe('AnnotationHeader', () => {
       fakeIsReply.returns(true);
 
       const wrapper = createAnnotationHeader({
-        annotation: annotation,
+        annotation,
         threadIsCollapsed: true,
       });
 
@@ -282,14 +273,21 @@ describe('AnnotationHeader', () => {
   });
 
   describe('extended header information', () => {
+    it('should render extended header information if annotation is not a reply', () => {
+      fakeIsReply.returns(false);
+      const wrapper = createAnnotationHeader();
+
+      // Extended header information is rendered in a second (flex) row
+      assert.equal(wrapper.find('HeaderRow').length, 2);
+    });
+
     it('should not render extended header information if annotation is reply', () => {
       fakeIsReply.returns(true);
       const wrapper = createAnnotationHeader({
         showDocumentInfo: true,
       });
 
-      assert.isFalse(wrapper.find('AnnotationShareInfo').exists());
-      assert.isFalse(wrapper.find('AnnotationDocumentInfo').exists());
+      assert.equal(wrapper.find('HeaderRow').length, 1);
     });
 
     describe('annotation is-highlight icon', () => {
@@ -298,7 +296,7 @@ describe('AnnotationHeader', () => {
         const wrapper = createAnnotationHeader({
           isEditing: false,
         });
-        const highlightIcon = wrapper.find('.AnnotationHeader__highlight');
+        const highlightIcon = wrapper.find('Icon[name="highlight"]');
 
         assert.isTrue(highlightIcon.exists());
       });
@@ -308,9 +306,24 @@ describe('AnnotationHeader', () => {
         const wrapper = createAnnotationHeader({
           isEditing: false,
         });
-        const highlightIcon = wrapper.find('.AnnotationHeader__highlight');
+        const highlightIcon = wrapper.find('Icon[name="highlight"]');
 
         assert.isFalse(highlightIcon.exists());
+      });
+    });
+
+    describe('Annotation share info', () => {
+      it('should render annotation share/group information if group is available', () => {
+        const wrapper = createAnnotationHeader();
+
+        assert.isTrue(wrapper.find('AnnotationShareInfo').exists());
+      });
+
+      it('should not render annotation share/group information if group is unavailable', () => {
+        fakeStore.getGroup.returns(undefined);
+        const wrapper = createAnnotationHeader();
+
+        assert.isFalse(wrapper.find('AnnotationShareInfo').exists());
       });
     });
 
@@ -414,7 +427,7 @@ describe('AnnotationHeader', () => {
         isEditing: true,
         isHighlight: true,
       });
-      const highlight = wrapper.find('.AnnotationHeader__highlight');
+      const highlight = wrapper.find('Icon[name="highlight"]');
 
       assert.isFalse(highlight.exists());
     });

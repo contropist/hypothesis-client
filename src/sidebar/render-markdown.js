@@ -1,6 +1,6 @@
 import createDOMPurify from 'dompurify';
 import escapeHtml from 'escape-html';
-import * as katex from 'katex';
+import katex from 'katex';
 import showdown from 'showdown';
 
 const DOMPurify = createDOMPurify(window);
@@ -14,14 +14,17 @@ DOMPurify.addHook('afterSanitizeAttributes', node => {
 });
 
 function targetBlank() {
+  /** @param {string} text */
   function filter(text) {
     return text.replace(/<a href=/g, '<a target="_blank" href=');
   }
-  return [{ type: 'output', filter: filter }];
+  return [{ type: 'output', filter }];
 }
 
+/** @type {showdown.Converter} */
 let converter;
 
+/** @param {string} markdown */
 function renderMarkdown(markdown) {
   if (!converter) {
     // see https://github.com/showdownjs/showdown#valid-options
@@ -33,22 +36,36 @@ function renderMarkdown(markdown) {
       // transformed into <em>'s.
       // See https://github.com/showdownjs/showdown/issues/211
       literalMidWordUnderscores: true,
+      // Enable strikethrough, which is disabled by default
+      strikethrough: true,
     });
   }
   return converter.makeHtml(markdown);
 }
 
+/** @param {number} id */
 function mathPlaceholder(id) {
   return '{math:' + id.toString() + '}';
 }
+
+/**
+ * @typedef MathBlock
+ * @prop {number} id
+ * @prop {boolean} inline
+ * @prop {string} expression
+ */
 
 /**
  * Parses a string containing mixed markdown and LaTeX in between
  * '$$..$$' or '\( ... \)' delimiters and returns an object containing a
  * list of math blocks found in the string, plus the input string with math
  * blocks replaced by placeholders.
+ *
+ * @param {string} content
+ * @return {{ content: string, mathBlocks: MathBlock[]}}
  */
 function extractMath(content) {
+  /** @type {MathBlock[]} */
   const mathBlocks = [];
   let pos = 0;
   let replacedContent = content;
@@ -84,7 +101,7 @@ function extractMath(content) {
     const id = mathBlocks.length + 1;
     const placeholder = mathPlaceholder(id);
     mathBlocks.push({
-      id: id,
+      id,
       expression: replacedContent.slice(mathStart + 2, mathEnd - 2),
       inline: inlineMathStart !== -1,
     });
@@ -106,13 +123,17 @@ function extractMath(content) {
   }
 
   return {
-    mathBlocks: mathBlocks,
+    mathBlocks,
     content: replacedContent,
   };
 }
 
+/**
+ * @param {string} html
+ * @param {MathBlock[]} mathBlocks
+ */
 function insertMath(html, mathBlocks) {
-  return mathBlocks.reduce(function (html, block) {
+  return mathBlocks.reduce((html, block) => {
     let renderedMath;
     try {
       if (block.inline) {
@@ -129,7 +150,10 @@ function insertMath(html, mathBlocks) {
   }, html);
 }
 
-export default function renderMathAndMarkdown(markdown) {
+/**
+ * @param {string} markdown
+ */
+export function renderMathAndMarkdown(markdown) {
   // KaTeX takes care of escaping its input, so we want to avoid passing its
   // output through the HTML sanitizer. Therefore we first extract the math
   // blocks from the input, render and sanitize the remaining markdown and then

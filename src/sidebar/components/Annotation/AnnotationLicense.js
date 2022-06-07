@@ -1,24 +1,23 @@
-import { SvgIcon } from '@hypothesis/frontend-shared';
+import { Icon, Link } from '@hypothesis/frontend-shared';
 
 /**
  * Render information about CC licensing
  */
 export default function AnnotationLicense() {
   return (
-    <div className="AnnotationLicense">
-      <a
-        className="u-layout-row u-color-text--muted"
+    <div className="pt-2 border-t text-sm leading-none">
+      <Link
+        classes="flex items-center text-color-text-light"
         href="http://creativecommons.org/publicdomain/zero/1.0/"
-        title="View more information about the Creative Commons Public Domain dedication"
         target="_blank"
-        rel="noopener noreferrer"
+        title="View more information about the Creative Commons Public Domain dedication"
       >
-        <div className="AnnotationLicense__icons">
-          <SvgIcon name="cc-std" inline={true} className="u-icon--xsmall" />
-          <SvgIcon name="cc-zero" inline={true} className="u-icon--xsmall" />
+        <Icon name="cc-std" classes="text-tiny" />
+        <Icon name="cc-zero" classes="ml-px text-tiny" />
+        <div className="ml-1">
+          Annotations can be freely reused by anyone for any purpose.
         </div>
-        Annotations can be freely reused by anyone for any purpose.
-      </a>
+      </Link>
     </div>
   );
 }

@@ -4,7 +4,7 @@ import ShareAnnotationsPanel from '../ShareAnnotationsPanel';
 import { $imports } from '../ShareAnnotationsPanel';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
 describe('ShareAnnotationsPanel', () => {
   let fakeStore;
@@ -45,7 +45,7 @@ describe('ShareAnnotationsPanel', () => {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      '../store': { useSidebarStore: () => fakeStore },
       '../helpers/annotation-sharing': {
         pageSharingLink: fakePageSharingLink,
       },
@@ -95,7 +95,6 @@ describe('ShareAnnotationsPanel', () => {
 
     it('renders panel content if needed info available', () => {
       const wrapper = createShareAnnotationsPanel();
-      assert.isTrue(wrapper.exists('.ShareAnnotationsPanel'));
       assert.isFalse(wrapper.find('Spinner').exists());
     });
   });
@@ -104,17 +103,20 @@ describe('ShareAnnotationsPanel', () => {
     {
       groupType: 'private',
       introPattern: /Use this link.*with other group members/,
-      visibilityPattern: /Annotations in the private group.*are only visible to group members/,
+      visibilityPattern:
+        /Annotations in the private group.*are only visible to group members/,
     },
     {
       groupType: 'restricted',
       introPattern: /Use this link to share these annotations with anyone/,
-      visibilityPattern: /Anyone using this link may view the annotations in the group/,
+      visibilityPattern:
+        /Anyone using this link may view the annotations in the group/,
     },
     {
       groupType: 'open',
       introPattern: /Use this link to share these annotations with anyone/,
-      visibilityPattern: /Anyone using this link may view the annotations in the group/,
+      visibilityPattern:
+        /Anyone using this link may view the annotations in the group/,
     },
   ].forEach(testCase => {
     it('it displays appropriate help text depending on group type', () => {
@@ -127,12 +129,12 @@ describe('ShareAnnotationsPanel', () => {
       const wrapper = createShareAnnotationsPanel();
 
       assert.match(
-        wrapper.find('.ShareAnnotationsPanel__intro').text(),
+        wrapper.find('[data-testid="sharing-intro"]').text(),
         testCase.introPattern
       );
 
       assert.match(
-        wrapper.find('.ShareAnnotationsPanel').text(),
+        wrapper.find('[data-testid="sharing-details"]').text(),
         testCase.visibilityPattern
       );
     });
@@ -143,7 +145,7 @@ describe('ShareAnnotationsPanel', () => {
 
         const wrapper = createShareAnnotationsPanel();
 
-        const panelEl = wrapper.find('.ShareAnnotationsPanel');
+        const panelEl = wrapper.find('[data-testid="no-sharing"]');
         assert.include(panelEl.text(), 'These annotations cannot be shared');
       });
     });

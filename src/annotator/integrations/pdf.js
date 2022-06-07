@@ -1,25 +1,33 @@
 import debounce from 'lodash.debounce';
 import { render } from 'preact';
 
+import { ListenerCollection } from '../../shared/listener-collection';
 import {
   RenderingStates,
   anchor,
+  canDescribe,
   describe,
   documentHasText,
 } from '../anchoring/pdf';
+import { isInPlaceholder, removePlaceholder } from '../anchoring/placeholder';
+import Banners from '../components/Banners';
+import ContentPartnerBanner from '../components/ContentPartnerBanner';
 import WarningBanner from '../components/WarningBanner';
 import { createShadowRoot } from '../util/shadow-root';
-import { ListenerCollection } from '../util/listener-collection';
+import { offsetRelativeTo, scrollElement } from '../util/scroll';
 
 import { PDFMetadata } from './pdf-metadata';
 
 /**
  * @typedef {import('../../types/annotator').Anchor} Anchor
+ * @typedef {import('../../types/annotator').AnnotationData} AnnotationData
  * @typedef {import('../../types/annotator').Annotator} Annotator
+ * @typedef {import('../../types/annotator').ContentPartner} ContentPartner
  * @typedef {import('../../types/annotator').HypothesisWindow} HypothesisWindow
  * @typedef {import('../../types/annotator').Integration} Integration
  * @typedef {import('../../types/annotator').SidebarLayout} SidebarLayout
  * @typedef {import('../../types/api').Selector} Selector
+ * @typedef {import('../../types/pdfjs').PDFViewerApplication} PDFViewerApplication
  */
 
 // The viewport and controls for PDF.js start breaking down below about 670px
@@ -28,26 +36,59 @@ import { PDFMetadata } from './pdf-metadata';
 const MIN_PDF_WIDTH = 680;
 
 /**
- * Integration that works with PDF.js
+ * Return true if `anchor` is in an un-rendered page.
  *
+ * @param {Anchor} anchor
+ */
+function anchorIsInPlaceholder(anchor) {
+  const highlight = anchor.highlights?.[0];
+  return highlight && isInPlaceholder(highlight);
+}
+
+/** @param {number} ms */
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Is the current document the PDF.js viewer application?
+ */
+export function isPDF() {
+  // @ts-ignore - TS doesn't know about PDFViewerApplication global.
+  return typeof PDFViewerApplication !== 'undefined';
+}
+
+/**
+ * Integration that works with PDF.js
  * @implements {Integration}
  */
 export class PDFIntegration {
   /**
    * @param {Annotator} annotator
+   * @param {object} options
+   *   @param {ContentPartner} [options.contentPartner] - If set, show branding
+   *     for the given content partner in a banner above the PDF viewer.
+   *   @param {number} [options.reanchoringMaxWait] - Max time to wait for
+   *     re-anchoring to complete when scrolling to an un-rendered page.
    */
-  constructor(annotator) {
+  constructor(annotator, options = {}) {
     this.annotator = annotator;
 
     const window_ = /** @type {HypothesisWindow} */ (window);
-    this.pdfViewer = window_.PDFViewerApplication.pdfViewer;
+
+    // Assume this class is only used if we're in the PDF.js viewer.
+    const pdfViewerApp = /** @type {PDFViewerApplication} */ (
+      window_.PDFViewerApplication
+    );
+
+    this.pdfViewer = pdfViewerApp.pdfViewer;
     this.pdfViewer.viewer.classList.add('has-transparent-text-layer');
 
     // Get the element that contains all of the PDF.js UI. This is typically
     // `document.body`.
-    this.pdfContainer = window_.PDFViewerApplication?.appConfig?.appContainer;
+    this.pdfContainer = pdfViewerApp.appConfig?.appContainer ?? document.body;
 
-    this.pdfMetadata = new PDFMetadata(window_.PDFViewerApplication);
+    this.pdfMetadata = new PDFMetadata(pdfViewerApp);
 
     this.observer = new MutationObserver(debounce(() => this._update(), 100));
     this.observer.observe(this.pdfViewer.viewer, {
@@ -58,12 +99,30 @@ export class PDFIntegration {
     });
 
     /**
-     * A banner shown at the top of the PDF viewer warning the user if the PDF
-     * is not suitable for use with Hypothesis.
+     * Amount of time to wait for re-anchoring to complete when scrolling to
+     * an anchor in a not-yet-rendered page.
+     */
+    this._reanchoringMaxWait = options.reanchoringMaxWait ?? 3000;
+
+    /**
+     * Banners shown at the top of the PDF viewer.
      *
      * @type {HTMLElement|null}
      */
-    this._warningBanner = null;
+    this._banner = null;
+
+    /** State indicating which banners to show above the PDF viewer. */
+    this._bannerState = {
+      /**
+       * Branding for a content provider.
+       *
+       * @type {ContentPartner|null}
+       */
+      contentPartner: options.contentPartner ?? null,
+      /** Warning that the current PDF does not have selectable text. */
+      noTextWarning: false,
+    };
+    this._updateBannerState(this._bannerState);
     this._checkForSelectableText();
 
     // Hide annotation layer when the user is making a selection. The annotation
@@ -96,6 +155,7 @@ export class PDFIntegration {
     this._listeners.removeAll();
     this.pdfViewer.viewer.classList.remove('has-transparent-text-layer');
     this.observer.disconnect();
+    this._banner?.remove();
     this._destroyed = true;
   }
 
@@ -124,6 +184,15 @@ export class PDFIntegration {
     // nb. The `root` argument is not really used by `anchor`. It existed for
     // consistency between HTML and PDF anchoring and could be removed.
     return anchor(root, selectors);
+  }
+
+  /**
+   * Return true if the text in a range lies within the text layer of a PDF.
+   *
+   * @param {Range} range
+   */
+  canAnnotate(range) {
+    return canDescribe(range);
   }
 
   /**
@@ -158,7 +227,7 @@ export class PDFIntegration {
 
     try {
       const hasText = await documentHasText();
-      this._toggleNoSelectableTextWarning(!hasText);
+      this._updateBannerState({ noTextWarning: !hasText });
     } catch (err) {
       /* istanbul ignore next */
       console.warn('Unable to check for text in PDF:', err);
@@ -166,21 +235,25 @@ export class PDFIntegration {
   }
 
   /**
-   * Set whether the warning about a PDF's suitability for use with Hypothesis
-   * is shown.
+   * Update banners shown above the PDF viewer.
    *
-   * @param {boolean} showWarning
+   * @param {Partial<typeof PDFIntegration.prototype._bannerState>} state
    */
-  _toggleNoSelectableTextWarning(showWarning) {
+  _updateBannerState(state) {
+    this._bannerState = { ...this._bannerState, ...state };
+
     // Get a reference to the top-level DOM element associated with the PDF.js
     // viewer.
-    const outerContainer = /** @type {HTMLElement} */ (document.querySelector(
-      '#outerContainer'
-    ));
+    const outerContainer = /** @type {HTMLElement} */ (
+      document.querySelector('#outerContainer')
+    );
 
-    if (!showWarning) {
-      this._warningBanner?.remove();
-      this._warningBanner = null;
+    const showBanner =
+      this._bannerState.contentPartner || this._bannerState.noTextWarning;
+
+    if (!showBanner) {
+      this._banner?.remove();
+      this._banner = null;
 
       // Undo inline styles applied when the banner is shown. The banner will
       // then gets its normal 100% height set by PDF.js's CSS.
@@ -189,13 +262,26 @@ export class PDFIntegration {
       return;
     }
 
-    this._warningBanner = document.createElement('hypothesis-banner');
-    document.body.prepend(this._warningBanner);
+    if (!this._banner) {
+      this._banner = document.createElement('hypothesis-banner');
+      document.body.prepend(this._banner);
+      createShadowRoot(this._banner);
+    }
 
-    const warningBannerContent = createShadowRoot(this._warningBanner);
-    render(<WarningBanner />, warningBannerContent);
+    render(
+      <Banners>
+        {this._bannerState.contentPartner && (
+          <ContentPartnerBanner
+            provider={this._bannerState.contentPartner}
+            onClose={() => this._updateBannerState({ contentPartner: null })}
+          />
+        )}
+        {this._bannerState.noTextWarning && <WarningBanner />}
+      </Banners>,
+      /** @type {ShadowRoot} */ (this._banner.shadowRoot)
+    );
 
-    const bannerHeight = this._warningBanner.getBoundingClientRect().height;
+    const bannerHeight = this._banner.getBoundingClientRect().height;
 
     // The `#outerContainer` element normally has height set to 100% of the body.
     //
@@ -209,12 +295,12 @@ export class PDFIntegration {
   // This method (re-)anchors annotations when pages are rendered and destroyed.
   _update() {
     // A list of annotations that need to be refreshed.
-    const refreshAnnotations = [];
+    const refreshAnnotations = /** @type {AnnotationData[]} */ ([]);
 
     const pageCount = this.pdfViewer.pagesCount;
     for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
       const page = this.pdfViewer.getPageView(pageIndex);
-      if (!page.textLayer?.renderingDone) {
+      if (!page?.textLayer?.renderingDone) {
         continue;
       }
 
@@ -230,12 +316,7 @@ export class PDFIntegration {
           // means the PDF anchoring module anchored annotations before it was
           // rendered. Remove this, which will cause the annotations to anchor
           // again, below.
-          {
-            const placeholder = page.div.querySelector(
-              '.annotator-placeholder'
-            );
-            placeholder?.parentNode.removeChild(placeholder);
-          }
+          removePlaceholder(page.div);
           break;
       }
     }
@@ -272,9 +353,9 @@ export class PDFIntegration {
    * @return {HTMLElement}
    */
   contentContainer() {
-    return /** @type {HTMLElement} */ (document.querySelector(
-      '#viewerContainer'
-    ));
+    return /** @type {HTMLElement} */ (
+      document.querySelector('#viewerContainer')
+    );
   }
 
   /**
@@ -291,8 +372,17 @@ export class PDFIntegration {
     const maximumWidthToFit = window.innerWidth - sidebarLayout.width;
     const active = sidebarLayout.expanded && maximumWidthToFit >= MIN_PDF_WIDTH;
 
-    this.pdfContainer.style.width = active ? maximumWidthToFit + 'px' : 'auto';
-    this.pdfContainer.classList.toggle('hypothesis-side-by-side', active);
+    // If the sidebar is closed, we reserve enough space for the toolbar controls
+    // so that they don't overlap a) the chevron-menu on the right side of
+    // PDF.js's top toolbar and b) the document's scrollbar.
+    //
+    // If the sidebar is open, we reserve space for the whole sidebar if there is
+    // room, otherwise we reserve the same space as in the closed state to
+    // prevent the PDF content shifting when opening and closing the sidebar.
+    const reservedSpace = active
+      ? sidebarLayout.width
+      : sidebarLayout.toolbarWidth;
+    this.pdfContainer.style.width = `calc(100% - ${reservedSpace}px)`;
 
     // The following logic is pulled from PDF.js `webViewerResize`
     const currentScaleValue = this.pdfViewer.currentScaleValue;
@@ -309,5 +399,87 @@ export class PDFIntegration {
     this.pdfViewer.update();
 
     return active;
+  }
+
+  /**
+   * Scroll to the location of an anchor in the PDF.
+   *
+   * If the anchor refers to a location that is an un-rendered page far from
+   * the viewport, then scrolling happens in three phases. First the document
+   * scrolls to the approximate location indicated by the placeholder anchor,
+   * then `scrollToAnchor` waits until the page's text layer is rendered and
+   * the annotation is re-anchored in the fully rendered page. Then it scrolls
+   * again to the final location.
+   *
+   * @param {Anchor} anchor
+   */
+  async scrollToAnchor(anchor) {
+    const annotation = anchor.annotation;
+    const inPlaceholder = anchorIsInPlaceholder(anchor);
+    const offset = this._anchorOffset(anchor);
+    if (offset === null) {
+      return;
+    }
+
+    // nb. We only compute the scroll offset once at the start of scrolling.
+    // This is important as the highlight may be removed from the document during
+    // the scroll due to a page transitioning from rendered <-> un-rendered.
+    await scrollElement(this.contentContainer(), offset);
+
+    if (inPlaceholder) {
+      const anchor = await this._waitForAnnotationToBeAnchored(
+        annotation,
+        this._reanchoringMaxWait
+      );
+      if (!anchor) {
+        return;
+      }
+      const offset = this._anchorOffset(anchor);
+      if (offset === null) {
+        return;
+      }
+      await scrollElement(this.contentContainer(), offset);
+    }
+  }
+
+  /**
+   * Wait for an annotation to be anchored in a rendered page.
+   *
+   * @param {AnnotationData} annotation
+   * @param {number} maxWait
+   * @return {Promise<Anchor|null>}
+   */
+  async _waitForAnnotationToBeAnchored(annotation, maxWait) {
+    const start = Date.now();
+    let anchor;
+    do {
+      // nb. Re-anchoring might result in a different anchor object for the
+      // same annotation.
+      anchor = this.annotator.anchors.find(a => a.annotation === annotation);
+      if (!anchor || anchorIsInPlaceholder(anchor)) {
+        anchor = null;
+
+        // If no anchor was found, wait a bit longer and check again to see if
+        // re-anchoring completed.
+        await delay(20);
+      }
+    } while (!anchor && Date.now() - start < maxWait);
+    return anchor ?? null;
+  }
+
+  /**
+   * Return the offset that the PDF content container would need to be scrolled
+   * to, in order to make an anchor visible.
+   *
+   * @param {Anchor} anchor
+   * @return {number|null} - Target offset or `null` if this anchor was not resolved
+   */
+  _anchorOffset(anchor) {
+    if (!anchor.highlights) {
+      // This anchor was not resolved to a location in the document.
+      return null;
+    }
+    const highlight = anchor.highlights[0];
+    return offsetRelativeTo(highlight, this.contentContainer());
   }
 }

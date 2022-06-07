@@ -1,5 +1,5 @@
-import createStore from '../../create-store';
-import sidebarPanels from '../sidebar-panels';
+import { createStore } from '../../create-store';
+import { sidebarPanelsModule } from '../sidebar-panels';
 
 describe('sidebar/store/modules/sidebar-panels', () => {
   let store;
@@ -9,10 +9,10 @@ describe('sidebar/store/modules/sidebar-panels', () => {
   };
 
   beforeEach(() => {
-    store = createStore([sidebarPanels]);
+    store = createStore([sidebarPanelsModule]);
   });
 
-  describe('#init', () => {
+  describe('#initialState', () => {
     it('sets initial `activePanelName` to `null`', () => {
       assert.equal(getSidebarPanelsState().activePanelName, null);
     });

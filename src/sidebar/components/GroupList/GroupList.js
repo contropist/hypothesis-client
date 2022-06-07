@@ -1,12 +1,13 @@
+import classnames from 'classnames';
 import { useMemo, useState } from 'preact/hooks';
 
-import serviceConfig from '../../config/service-config';
+import { serviceConfig } from '../../config/service-config';
 import { isThirdPartyUser } from '../../helpers/account-id';
 import { orgName } from '../../helpers/group-list-item-common';
-import groupsByOrganization from '../../helpers/group-organizations';
-import isThirdPartyService from '../../helpers/is-third-party-service';
+import { groupsByOrganization } from '../../helpers/group-organizations';
+import { isThirdPartyService } from '../../helpers/is-third-party-service';
 import { withServices } from '../../service-context';
-import { useStoreProxy } from '../../store/use-store';
+import { useSidebarStore } from '../../store';
 
 import Menu from '../Menu';
 import MenuItem from '../MenuItem';
@@ -14,13 +15,15 @@ import MenuItem from '../MenuItem';
 import GroupListSection from './GroupListSection';
 
 /**
- * @typedef {import('../../../types/config').MergedConfig} MergedConfig
+ * @typedef {import('../../../types/config').SidebarSettings} SidebarSettings
  * @typedef {import('../../../types/api').Group} Group
  */
 
 /**
  * Return the custom icon for the top bar configured by the publisher in
  * the Hypothesis client configuration.
+ *
+ * @param {SidebarSettings} settings
  */
 function publisherProvidedIcon(settings) {
   const svc = serviceConfig(settings);
@@ -29,7 +32,7 @@ function publisherProvidedIcon(settings) {
 
 /**
  * @typedef GroupListProps
- * @prop {MergedConfig} settings
+ * @prop {SidebarSettings} settings
  */
 
 /**
@@ -39,16 +42,17 @@ function publisherProvidedIcon(settings) {
  * @param {GroupListProps} props
  */
 function GroupList({ settings }) {
-  const store = useStoreProxy();
+  const store = useSidebarStore();
   const currentGroups = store.getCurrentlyViewingGroups();
   const featuredGroups = store.getFeaturedGroups();
   const myGroups = store.getMyGroups();
   const focusedGroup = store.focusedGroup();
   const userid = store.profile().userid;
 
-  const myGroupsSorted = useMemo(() => groupsByOrganization(myGroups), [
-    myGroups,
-  ]);
+  const myGroupsSorted = useMemo(
+    () => groupsByOrganization(myGroups),
+    [myGroups]
+  );
 
   const featuredGroupsSorted = useMemo(
     () => groupsByOrganization(featuredGroups),
@@ -83,9 +87,21 @@ function GroupList({ settings }) {
     // and pass an empty string.
     const altName = orgName(focusedGroup) ? orgName(focusedGroup) : '';
     label = (
-      <span className="GroupList__menu-label">
+      <span
+        className={classnames(
+          // Don't allow this label to shrink (wrap to next line)
+          'shrink-0 flex items-center gap-x-1 text-lg text-color-text font-bold'
+        )}
+      >
         {icon && (
-          <img className="GroupList__menu-icon" src={icon} alt={altName} />
+          <img
+            className={classnames(
+              // Tiny adjustment to make H logo align better with group name
+              'relative top-[1px] w-4 h-4'
+            )}
+            src={icon}
+            alt={altName}
+          />
         )}
         {focusedGroup.name}
       </span>
@@ -111,7 +127,7 @@ function GroupList({ settings }) {
   return (
     <Menu
       align="left"
-      contentClass="GroupList__content"
+      contentClass="min-w-[250px]"
       label={label}
       onOpenChanged={() => setExpandedGroup(null)}
       title={menuTitle}
@@ -148,6 +164,4 @@ function GroupList({ settings }) {
   );
 }
 
-GroupList.injectedProps = ['settings'];
-
-export default withServices(GroupList);
+export default withServices(GroupList, ['settings']);

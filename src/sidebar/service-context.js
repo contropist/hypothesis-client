@@ -17,7 +17,7 @@ import { useContext } from 'preact/hooks';
 
 /**
  * @typedef ServiceProvider
- * @prop {(serviceName: string) => any} get
+ * @prop {(serviceName: string) => unknown} get
  */
 
 /** @type {ServiceProvider} */
@@ -41,32 +41,38 @@ const fallbackInjector = {
 export const ServiceContext = createContext(fallbackInjector);
 
 /**
- * Wrap a React component to inject any services it depends upon as props.
+ * @template Props
+ * @typedef {import("preact").ComponentType<Props>} ComponentType
+ */
+
+/**
+ * Wrap a Preact component to inject specified props using a dependency injector.
  *
- * Components declare their service dependencies in an `injectedProps` static
- * property.
+ * The returned component accepts the same props as the input component, except
+ * for those listed in the `serviceNames` argument. When the component is rendered
+ * the dependency injector is looked up using `useContext(ServiceContext)` and
+ * values for these props are obtained from the injector.
  *
- * Any props which are passed directly will override injected props.
+ * As a convenience for testing, the props specified by `serviceNames` can still
+ * be passed to the returned component. In this case they will override the
+ * injected values.
  *
  * @example
  *   function MyComponent({ settings }) {
  *     return ...
  *   }
  *
- *   // Declare services that are injected from context rather than passed by
- *   // the parent.
- *   MyComponent.injectedProps = ['settings']
+ *   // Wrap `MyComponent` to inject "settings" service from context.
+ *   export default withServices(MyComponent, ['settings']);
  *
- *   // Wrap `MyComponent` to inject any services it needs.
- *   export default withServices(MyComponent);
+ * @template {Record<string, unknown>} Props
+ * @template {string} ServiceName
+ * @param {ComponentType<Props>} Component
+ * @param {ServiceName[]} serviceNames - List of prop names that should be injected
+ * @return {ComponentType<Omit<Props,ServiceName>>}
  */
-export function withServices(Component) {
-  if (!Component.injectedProps) {
-    // This component doesn't depend on any services, so there is no need
-    // to wrap it.
-    return Component;
-  }
-
+export function withServices(Component, serviceNames) {
+  /** @param {Omit<Props,ServiceName>} props */
   function Wrapper(props) {
     // Get the current dependency injector instance that is provided by a
     // `ServiceContext.Provider` somewhere higher up the component tree.
@@ -74,8 +80,10 @@ export function withServices(Component) {
 
     // Inject services, unless they have been overridden by props passed from
     // the parent component.
+
+    /** @type {Record<string,unknown>} */
     const services = {};
-    for (let service of Component.injectedProps) {
+    for (let service of serviceNames) {
       // Debugging check to make sure the store is used correctly.
       if (process.env.NODE_ENV !== 'production') {
         if (service === 'store') {
@@ -89,7 +97,9 @@ export function withServices(Component) {
         services[service] = injector.get(service);
       }
     }
-    return <Component {...services} {...props} />;
+
+    const propsWithServices = /** @type {Props} */ ({ ...services, ...props });
+    return <Component {...propsWithServices} />;
   }
 
   // Set the name of the wrapper for use in debug tools and queries in Enzyme
@@ -107,7 +117,6 @@ export function withServices(Component) {
  * context of custom hooks.
  *
  * @param {string} service - Name of the service to look up
- * @return {Object}
  */
 export function useService(service) {
   const injector = useContext(ServiceContext);

@@ -1,7 +1,9 @@
+import { delay } from '../../../test-util/wait';
 import * as pdfAnchoring from '../pdf';
+import { matchQuote } from '../match-quote';
 import { TextRange } from '../text-range';
 
-import FakePDFViewerApplication from './fake-pdf-viewer-application';
+import { FakePDFViewerApplication } from './fake-pdf-viewer-application';
 
 /**
  * Return a DOM Range which refers to the specified `text` in `container`.
@@ -18,15 +20,15 @@ function findText(container, text) {
   return TextRange.fromOffsets(container, pos, pos + text.length).toRange();
 }
 
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 const fixtures = {
-  // Each item in this list contains the text for one page of the "PDF"
+  // Each item in this list contains the text for one page of the "PDF".
+  //
+  // Each line within an item is converted to a single text item, as returned by
+  // PDF.js' text APIs, and rendered as a separate element in the text layer.
   pdfPages: [
     'Pride And Prejudice And Zombies\n' +
-      'By Jane Austin and Seth Grahame-Smith ',
+      '       \n' + // nb. Blank text item handling differs between PDF.js versions
+      'By Jane Austen and Seth Grahame-Smith ',
 
     'IT IS A TRUTH universally acknowledged that a zombie in possession of\n' +
       'brains must be in want of more brains. Never was this truth more plain\n' +
@@ -40,7 +42,7 @@ const fixtures = {
   ],
 };
 
-describe('annotator/anchoring/pdf', function () {
+describe('annotator/anchoring/pdf', () => {
   let container;
   let viewer;
 
@@ -49,8 +51,9 @@ describe('annotator/anchoring/pdf', function () {
    *
    * @param {string[]} content -
    *   Array containing the text content of each page of the loaded PDF document
+   * @param {import('./fake-pdf-viewer-application').PDFJSConfig} [config]
    */
-  function initViewer(content) {
+  function initViewer(content, config) {
     cleanupViewer();
 
     // The rendered text for each page is cached during anchoring.
@@ -60,6 +63,7 @@ describe('annotator/anchoring/pdf', function () {
     viewer = new FakePDFViewerApplication({
       container,
       content,
+      config,
     });
     window.PDFViewerApplication = viewer;
 
@@ -71,50 +75,50 @@ describe('annotator/anchoring/pdf', function () {
   /** Clean up any resources created by the fake PDF.js viewer. */
   function cleanupViewer() {
     viewer?.dispose();
-    window.PDFViewerApplication = null;
+    delete window.PDFViewerApplication;
   }
 
-  beforeEach(function () {
+  beforeEach(() => {
     container = document.createElement('div');
     document.body.appendChild(container);
     initViewer(fixtures.pdfPages);
   });
 
-  afterEach(function () {
+  afterEach(() => {
+    pdfAnchoring.$imports.$restore();
     cleanupViewer();
     container.remove();
   });
 
-  describe('#describe', function () {
-    it('returns position and quote selectors', function () {
+  describe('describe', () => {
+    it('returns position and quote selectors', () => {
       viewer.pdfViewer.setCurrentPage(2);
       const range = findText(container, 'Netherfield Park');
-      return pdfAnchoring.describe(container, range).then(function (selectors) {
-        const types = selectors.map(function (s) {
+      return pdfAnchoring.describe(container, range).then(selectors => {
+        const types = selectors.map(s => {
           return s.type;
         });
         assert.deepEqual(types, ['TextPositionSelector', 'TextQuoteSelector']);
       });
     });
 
-    it('returns a position selector with correct start/end offsets', function () {
+    it('returns a position selector with correct start/end offsets', async () => {
       viewer.pdfViewer.setCurrentPage(2);
       const quote = 'Netherfield Park';
       const range = findText(container, quote);
       const contentStr = fixtures.pdfPages.join('');
       const expectedPos = contentStr.replace(/\n/g, '').lastIndexOf(quote);
 
-      return pdfAnchoring.describe(container, range).then(function (selectors) {
-        const position = selectors[0];
-        assert.equal(position.start, expectedPos);
-        assert.equal(position.end, expectedPos + quote.length);
-      });
+      const [positionSelector] = await pdfAnchoring.describe(container, range);
+
+      assert.equal(positionSelector.start, expectedPos);
+      assert.equal(positionSelector.end, expectedPos + quote.length);
     });
 
-    it('returns a quote selector with the correct quote', function () {
+    it('returns a quote selector with the correct quote', () => {
       viewer.pdfViewer.setCurrentPage(2);
       const range = findText(container, 'Netherfield Park');
-      return pdfAnchoring.describe(container, range).then(function (selectors) {
+      return pdfAnchoring.describe(container, range).then(selectors => {
         const quote = selectors[1];
 
         assert.deepEqual(quote, {
@@ -126,7 +130,7 @@ describe('annotator/anchoring/pdf', function () {
       });
     });
 
-    it('returns selector when range starts at end of text node with no next siblings', function () {
+    it('returns selector when range starts at end of text node with no next siblings', () => {
       // this problem is referenced in client issue #122
       // But what is happening is the startContainer is referencing a text
       // elment inside of a node. The logic in pdf#describe() was assuming if the
@@ -139,8 +143,8 @@ describe('annotator/anchoring/pdf', function () {
       const quote = 'NODE B';
 
       // this selects NODE A text node
-      const textNodeSelected = container.querySelector('.textLayer div')
-        .firstChild;
+      const textNodeSelected =
+        container.querySelector('.textLayer div').firstChild;
       const staticRange = findText(container, quote);
 
       const range = {
@@ -155,7 +159,7 @@ describe('annotator/anchoring/pdf', function () {
       const contentStr = fixtures.pdfPages.join('');
       const expectedPos = contentStr.replace(/\n/g, '').lastIndexOf(quote);
 
-      return pdfAnchoring.describe(container, range).then(function (selectors) {
+      return pdfAnchoring.describe(container, range).then(selectors => {
         const position = selectors[0];
         assert.equal(position.start, expectedPos);
         assert.equal(position.end, expectedPos + quote.length);
@@ -206,38 +210,247 @@ describe('annotator/anchoring/pdf', function () {
     });
   });
 
-  describe('#anchor', function () {
-    it('anchors previously created selectors if the page is rendered', function () {
+  describe('canDescribe', () => {
+    it('returns true if range is in text layer', () => {
+      viewer.pdfViewer.setCurrentPage(2);
+      const range = findText(container, 'Netherfield Park');
+      assert.isTrue(pdfAnchoring.canDescribe(range));
+    });
+
+    // nb. These tests should correspond to the situations where `describe` throws.
+    it('returns false if range does not contain any text', () => {
+      viewer.pdfViewer.setCurrentPage(2, 3);
+
+      const range = new Range();
+      const el = document.createElement('div');
+      range.setStart(el, 0);
+      range.setEnd(el, 0);
+
+      assert.isFalse(pdfAnchoring.canDescribe(range));
+    });
+
+    it('returns false if range spans multiple pages', () => {
+      viewer.pdfViewer.setCurrentPage(2, 3);
+      const firstPageRange = findText(container, 'occupied again?');
+      const secondPageRange = findText(container, 'NODE A');
+      const range = new Range();
+      range.setStart(firstPageRange.startContainer, firstPageRange.startOffset);
+      range.setEnd(secondPageRange.startContainer, secondPageRange.endOffset);
+
+      assert.isFalse(pdfAnchoring.canDescribe(range));
+    });
+
+    it('returns false if range is outside text layer', () => {
+      viewer.pdfViewer.setCurrentPage(2, 3);
+
+      const range = new Range();
+      const el = document.createElement('div');
+      el.append('foobar');
+      range.setStart(el.firstChild, 0);
+      range.setEnd(el.firstChild, 6);
+
+      assert.isFalse(pdfAnchoring.canDescribe(range));
+    });
+  });
+
+  describe('anchor', () => {
+    it('anchors previously created selectors if the page is rendered', () => {
       viewer.pdfViewer.setCurrentPage(2);
       const range = findText(container, 'My dear Mr. Bennet');
-      return pdfAnchoring.describe(container, range).then(function (selectors) {
+      return pdfAnchoring.describe(container, range).then(selectors => {
         const position = selectors[0];
         const quote = selectors[1];
 
         // Test that all of the selectors anchor and that each selector individually
         // anchors correctly as well
-        const subsets = [[position, quote], [position], [quote]];
-        const subsetsAnchored = subsets.map(function (subset) {
-          const types = subset.map(function (s) {
+        const subsets = [[position, quote], [quote]];
+        const subsetsAnchored = subsets.map(subset => {
+          const types = subset.map(s => {
             return s.type;
           });
           const description = 'anchoring failed with ' + types.join(', ');
 
           return pdfAnchoring
             .anchor(container, subset)
-            .then(function (anchoredRange) {
+            .then(anchoredRange => {
               assert.equal(
                 anchoredRange.toString(),
                 range.toString(),
                 description
               );
             })
-            .catch(function (err) {
+            .catch(err => {
               console.warn(description);
               throw err;
             });
         });
         return Promise.all(subsetsAnchored);
+      });
+    });
+
+    [[], [{ type: 'TextPositionSelector', start: 0, end: 200 }]].forEach(
+      selectors => {
+        it('fails to anchor if there is no quote selector', async () => {
+          let error;
+          try {
+            await pdfAnchoring.anchor(container, selectors);
+          } catch (err) {
+            error = err;
+          }
+          assert.instanceOf(error, Error);
+          assert.equal(error.message, 'No quote selector found');
+        });
+      }
+    );
+
+    it('anchors text in older PDF.js versions', async () => {
+      initViewer(fixtures.pdfPages, { newTextRendering: false });
+
+      // Choose a quote in the first page, which has blank text items in it.
+      const quote = { type: 'TextQuoteSelector', exact: 'Jane Austen' };
+      const range = await pdfAnchoring.anchor(container, [quote]);
+
+      assert.equal(range.toString(), 'Jane Austen');
+    });
+
+    // See https://github.com/hypothesis/client/issues/3705
+    [
+      // Exact match for text in PDF.
+      'Netherfield Park is',
+
+      // Exact match for text in PDF when whitespace differences are ignored.
+      'Netherfield  Park  is',
+      'NetherfieldParkis',
+
+      // Close match for text in PDF.
+      'Netherfield Park as',
+    ].forEach(quoteText => {
+      it('anchors quotes to best match across all pages', async () => {
+        viewer.pdfViewer.setCurrentPage(2);
+        const quote = { type: 'TextQuoteSelector', exact: quoteText };
+        const range = await pdfAnchoring.anchor(container, [quote]);
+
+        // This should anchor to an exact match on the third page, rather than a
+        // close match on the second page.
+        assert.equal(range.toString(), 'Netherfield Park is');
+      });
+    });
+
+    [
+      {
+        // If there is only a prefix, that should match.
+        test: 'prefix-only',
+        prefix: 'that',
+        suffix: undefined,
+        expectedMatch: 'Netherfield Park is occupied again?',
+      },
+      {
+        // If there is only a suffix, that should match.
+        test: 'suffix-only',
+        prefix: undefined,
+        suffix: ' Park is occupied',
+        expectedMatch: 'Netherfield Park is occupied again?',
+      },
+      {
+        // If there is both a prefix and suffix, either can match
+        test: 'suffix-match',
+        prefix: 'DOES NOT MATCH',
+        suffix: ' Park is occupied',
+        expectedMatch: 'Netherfield Park is occupied again?',
+      },
+      {
+        // If there is both a prefix and suffix, either can match
+        test: 'prefix-match',
+        prefix: 'that',
+        suffix: 'DOES NOT MATCH',
+        expectedMatch: 'Netherfield Park is occupied again?',
+      },
+      {
+        // If there is neither a prefix or suffix, only the quote matters.
+        test: 'no-context',
+        prefix: undefined,
+        suffix: undefined,
+        expectedMatch: 'recent attacks at Netherfield Park',
+      },
+    ].forEach(({ test, prefix, suffix, expectedMatch }) => {
+      it(`prefers a context match for quote selectors (${test})`, async () => {
+        const expectedPage = fixtures.pdfPages.findIndex(page =>
+          page.includes(expectedMatch)
+        );
+        assert.notEqual(expectedPage, -1);
+
+        // Ensure the page where we expect to find the match is rendered, otherwise
+        // the quote will be anchored to a placeholder.
+        viewer.pdfViewer.setCurrentPage(expectedPage);
+
+        // Create a quote selector where the `exact` phrase occurs on multiple
+        // pages.
+        const quote = {
+          type: 'TextQuoteSelector',
+          exact: 'Netherfield',
+          prefix,
+          suffix,
+        };
+
+        // Anchor the quote without providing a position selector, so pages are tried in order.
+        const range = await pdfAnchoring.anchor(container, [quote]);
+
+        // Check that we found the match on the expected page.
+        assert.equal(range.toString(), 'Netherfield');
+        assert.include(
+          range.startContainer.parentElement.textContent,
+          expectedMatch
+        );
+      });
+    });
+
+    // The above test does high-level checking that whitespace mismatches don't
+    // affect quote anchoring. This test checks calls to `matchQuote` in more detail.
+    it('ignores spaces when searching for quote matches', async () => {
+      const matchQuoteSpy = sinon.spy(matchQuote);
+      pdfAnchoring.$imports.$mock({
+        './match-quote': { matchQuote: matchQuoteSpy },
+      });
+
+      viewer.pdfViewer.setCurrentPage(2);
+
+      // nb. The new lines in fixtures don't appear in the extracted PDF text.
+      const getPageText = page => fixtures.pdfPages[page].replaceAll('\n', '');
+
+      const quote = {
+        type: 'TextQuoteSelector',
+        exact: 'Mr. Bennet',
+        prefix: 'My dear',
+        suffix: '," said his lady',
+      };
+      const quoteOffset =
+        getPageText(0).length +
+        getPageText(1).length +
+        getPageText(2).indexOf(quote.exact);
+
+      const position = {
+        type: 'TextPositionSelector',
+        start: quoteOffset,
+
+        // Intentionally incorrect end position to trigger fallback to quote anchoring.
+        end: quoteOffset + 1,
+      };
+
+      await pdfAnchoring.anchor(container, [position, quote]);
+
+      const stripSpaces = str => str.replace(/\s+/g, '');
+      const strippedText = stripSpaces(fixtures.pdfPages[2]);
+      const strippedQuote = stripSpaces(quote.exact);
+
+      const call = matchQuoteSpy
+        .getCalls()
+        .find(call => call.args[0] === strippedText);
+      assert.ok(call);
+      assert.equal(call.args[1], strippedQuote);
+      assert.match(call.args[2], {
+        prefix: stripSpaces(quote.prefix),
+        suffix: stripSpaces(quote.suffix),
+        hint: strippedText.indexOf(strippedQuote),
       });
     });
 
@@ -256,49 +469,107 @@ describe('annotator/anchoring/pdf', function () {
 
     [
       {
-        // Position on same page as quote but different text.
+        // Position on page before quote.
         offset: 5,
       },
       {
-        // Position on a different page to the quote.
-        offset: fixtures.pdfPages[0].length + 10,
+        // Position same page as quote, but different location.
+        offset: fixtures.pdfPages[0].length + 1,
       },
       {
-        // Position invalid for document.
+        // Position on a page after the quote.
+        offset: fixtures.pdfPages[0].length + fixtures.pdfPages[1].length + 5,
+      },
+      {
+        // Position before beginning of document.
+        offset: -500,
+      },
+      {
+        // Position beyond end of document.
         offset: 100000,
       },
     ].forEach(({ offset }) => {
-      it('anchors using a quote if the position selector fails', function () {
-        viewer.pdfViewer.setCurrentPage(0);
-        const range = findText(container, 'Pride And Prejudice');
+      it('anchors using a quote if the position selector fails', () => {
+        viewer.pdfViewer.setCurrentPage(1);
+        const selection = 'zombie in possession';
+        const range = findText(container, selection);
         return pdfAnchoring
           .describe(container, range)
-          .then(function (selectors) {
-            const position = selectors[0];
-            const quote = selectors[1];
-
-            position.start += offset;
-            position.end += offset;
-
+          .then(([, quote]) => {
+            const position = {
+              type: 'TextPositionSelector',
+              start: offset,
+              end: offset + selection.length,
+            };
             return pdfAnchoring.anchor(container, [position, quote]);
           })
           .then(range => {
-            assert.equal(range.toString(), 'Pride And Prejudice');
+            assert.equal(range.toString(), selection);
           });
       });
     });
 
-    it('anchors to a placeholder element if the page is not rendered', function () {
+    it('anchors if text layer has different spaces than PDF.js text API output', async () => {
+      viewer.pdfViewer.setCurrentPage(1);
+      const selection = 'zombie in possession';
+      const range = findText(container, selection);
+      const [, quote] = await pdfAnchoring.describe(container, range);
+
+      // Add extra spaces into the text layer. This can happen due to
+      // differences in the way that PDF.js constructs the text layer compared
+      // to how we extract text. Anchoring should adjust the returned range
+      // accordingly.
+      const textLayerEl =
+        viewer.pdfViewer.getPageView(1).textLayer.textLayerDiv;
+      textLayerEl.textContent = textLayerEl.textContent.split('').join(' ');
+
+      const anchoredRange = await pdfAnchoring.anchor(container, [quote]);
+      assert.equal(
+        anchoredRange.toString(),
+        'z o m b i e   i n   p o s s e s s i o n'
+      );
+    });
+
+    it('anchors with mismatch if text layer differs from PDF.js text API output', async () => {
+      const warnOnce = sinon.stub();
+      pdfAnchoring.$imports.$mock({
+        '../../shared/warn-once': { warnOnce },
+      });
+
+      viewer.pdfViewer.setCurrentPage(1);
+      const selection = 'zombie in possession';
+      const range = findText(container, selection);
+      const [, quote] = await pdfAnchoring.describe(container, range);
+
+      // Modify text layer so it doesn't match text from PDF.js APIs.
+      // This will cause mis-anchoring, but if the differences are only minor,
+      // the result may still be useful.
+      const textLayerEl =
+        viewer.pdfViewer.getPageView(1).textLayer.textLayerDiv;
+      textLayerEl.textContent = textLayerEl.textContent.replace(
+        'zombie',
+        'zomby'
+      );
+
+      const anchoredRange = await pdfAnchoring.anchor(container, [quote]);
+      assert.equal(anchoredRange.toString(), 'zomby in possession o');
+      assert.calledWith(
+        warnOnce,
+        'Text layer text does not match page text. Highlights will be mis-aligned.'
+      );
+    });
+
+    it('anchors to a placeholder element if the page is not rendered', () => {
       viewer.pdfViewer.setCurrentPage(2);
       const range = findText(container, 'Netherfield Park');
       return pdfAnchoring
         .describe(container, range)
-        .then(function (selectors) {
+        .then(selectors => {
           viewer.pdfViewer.setCurrentPage(0);
           return pdfAnchoring.anchor(container, selectors);
         })
-        .then(function (anchoredRange) {
-          assert.equal(anchoredRange.toString(), 'Loading annotations…');
+        .then(anchoredRange => {
+          assert.equal(anchoredRange.toString(), 'Loading annotations...');
         });
     });
 

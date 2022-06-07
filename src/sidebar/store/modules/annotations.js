@@ -3,7 +3,20 @@
  * sidebar.
  */
 
-/** @typedef {import('../../../types/api').Annotation} Annotation */
+import { createSelector } from 'reselect';
+
+import * as metadata from '../../helpers/annotation-metadata';
+import { isSaved } from '../../helpers/annotation-metadata';
+import { countIf, toTrueMap, trueKeys } from '../../util/collections';
+import { createStoreModule, makeAction } from '../create-store';
+
+import { routeModule } from './route';
+
+/**
+ * @typedef {'anchored'|'orphan'|'timeout'} AnchorStatus
+ * @typedef {import('../../../types/api').Annotation} Annotation
+ * @typedef {import('../../../types/api').SavedAnnotation} SavedAnnotation
+ */
 
 /**
  * @typedef AnnotationStub
@@ -11,15 +24,6 @@
  *       persisted to the service
  * @prop {string} [$tag] - local-generated identifier
  */
-
-import { createSelector } from 'reselect';
-
-import * as metadata from '../../helpers/annotation-metadata';
-import { countIf, toTrueMap, trueKeys } from '../../util/collections';
-import * as util from '../util';
-import { storeModule } from '../create-store';
-
-import route from './route';
 
 /**
  * Return a copy of `current` with all matching annotations in `annotations`
@@ -32,33 +36,37 @@ import route from './route';
  * @param {AnnotationStub[]} annotations
  */
 function excludeAnnotations(current, annotations) {
-  const ids = {};
-  const tags = {};
-  annotations.forEach(function (annot) {
+  const ids = new Set();
+  const tags = new Set();
+  for (let annot of annotations) {
     if (annot.id) {
-      ids[annot.id] = true;
+      ids.add(annot.id);
     }
     if (annot.$tag) {
-      tags[annot.$tag] = true;
+      tags.add(annot.$tag);
     }
-  });
-  return current.filter(function (annot) {
+  }
+  return current.filter(annot => {
     const shouldRemove =
-      (annot.id && annot.id in ids) || (annot.$tag && annot.$tag in tags);
+      (annot.id && ids.has(annot.id)) || (annot.$tag && tags.has(annot.$tag));
     return !shouldRemove;
   });
 }
 
+/**
+ * @param {Annotation[]} annotations
+ * @param {string} id
+ */
 function findByID(annotations, id) {
-  return annotations.find(function (annot) {
-    return annot.id === id;
-  });
+  return annotations.find(a => a.id === id);
 }
 
+/**
+ * @param {Annotation[]} annotations
+ * @param {string} tag
+ */
 function findByTag(annotations, tag) {
-  return annotations.find(function (annot) {
-    return annot.$tag === tag;
-  });
+  return annotations.find(a => a.$tag === tag);
 }
 
 /**
@@ -68,10 +76,10 @@ function findByTag(annotations, tag) {
  * `annotation` may either be new (unsaved) or a persisted annotation retrieved
  * from the service.
  *
- * @param {Object} annotation
+ * @param {Omit<Annotation, '$anchorTimeout'>} annotation
  * @param {string} tag - The `$tag` value that should be used for this
  *                       if it doesn't have a `$tag` already
- * @return {Object} - annotation with local (`$*`) fields set
+ * @return {Annotation} - annotation with local (`$*`) fields set
  */
 function initializeAnnotation(annotation, tag) {
   let orphan = annotation.$orphan;
@@ -89,33 +97,48 @@ function initializeAnnotation(annotation, tag) {
   });
 }
 
-function init() {
-  return {
-    /** @type {Annotation[]} */
-    annotations: [],
-    // A set of annotations that are currently "focused" — e.g. hovered over in
-    // the UI
-    focused: {},
-    // A map of annotations that should appear as "highlighted", e.g. the
-    // target of a single-annotation view
-    highlighted: {},
-    // The local tag to assign to the next annotation that is loaded into the
-    // app
-    nextTag: 1,
-  };
-}
+const initialState = {
+  /**
+   * Set of all currently loaded annotations.
+   *
+   * @type {Annotation[]}
+   */
+  annotations: [],
+  /**
+   * A set of annotations that are currently "focused" — e.g. hovered over in
+   * the UI.
+   *
+   * @type {Record<string, boolean>}
+   */
+  focused: {},
+  /**
+   * A map of annotations that should appear as "highlighted", e.g. the
+   * target of a single-annotation view
+   *
+   * @type {Record<string, boolean>}
+   */
+  highlighted: {},
+  /** The local tag to assign to the next annotation that is loaded into the app. */
+  nextTag: 1,
+};
 
-const update = {
-  ADD_ANNOTATIONS: function (state, action) {
-    const updatedIDs = {};
-    const updatedTags = {};
+/** @typedef {typeof initialState} State */
+
+const reducers = {
+  /**
+   * @param {State} state
+   * @param {{ annotations: Annotation[], currentAnnotationCount: number }} action
+   */
+  ADD_ANNOTATIONS(state, action) {
+    const updatedIDs = new Set();
+    const updatedTags = new Set();
 
     const added = [];
     const unchanged = [];
     const updated = [];
     let nextTag = state.nextTag;
 
-    action.annotations.forEach(annot => {
+    for (let annot of action.annotations) {
       let existing;
       if (annot.id) {
         existing = findByID(state.annotations, annot.id);
@@ -129,39 +152,47 @@ const update = {
         // annotation
         updated.push(Object.assign({}, existing, annot));
         if (annot.id) {
-          updatedIDs[annot.id] = true;
+          updatedIDs.add(annot.id);
         }
         if (existing.$tag) {
-          updatedTags[existing.$tag] = true;
+          updatedTags.add(existing.$tag);
         }
       } else {
         added.push(initializeAnnotation(annot, 't' + nextTag));
         ++nextTag;
       }
-    });
+    }
 
-    state.annotations.forEach(annot => {
-      if (!updatedIDs[annot.id] && !updatedTags[annot.$tag]) {
+    for (let annot of state.annotations) {
+      if (!updatedIDs.has(annot.id) && !updatedTags.has(annot.$tag)) {
         unchanged.push(annot);
       }
-    });
+    }
 
     return {
       annotations: added.concat(updated).concat(unchanged),
-      nextTag: nextTag,
+      nextTag,
     };
   },
 
-  CLEAR_ANNOTATIONS: function () {
+  CLEAR_ANNOTATIONS() {
     return { annotations: [], focused: {}, highlighted: {} };
   },
 
-  FOCUS_ANNOTATIONS: function (state, action) {
+  /**
+   * @param {State} state
+   * @param {{ focusedTags: string[] }} action
+   */
+  FOCUS_ANNOTATIONS(state, action) {
     return { focused: toTrueMap(action.focusedTags) };
   },
 
-  HIDE_ANNOTATION: function (state, action) {
-    const anns = state.annotations.map(function (ann) {
+  /**
+   * @param {State} state
+   * @param {{ id: string }} action
+   */
+  HIDE_ANNOTATION(state, action) {
+    const anns = state.annotations.map(ann => {
       if (ann.id !== action.id) {
         return ann;
       }
@@ -170,18 +201,30 @@ const update = {
     return { annotations: anns };
   },
 
-  HIGHLIGHT_ANNOTATIONS: function (state, action) {
+  /**
+   * @param {State} state
+   * @param {{ highlighted: Record<string, boolean> }} action
+   */
+  HIGHLIGHT_ANNOTATIONS(state, action) {
     return { highlighted: action.highlighted };
   },
 
-  REMOVE_ANNOTATIONS: function (state, action) {
+  /**
+   * @param {State} state
+   * @param {{ annotationsToRemove: AnnotationStub[], remainingAnnotations: Annotation[] }} action
+   */
+  REMOVE_ANNOTATIONS(state, action) {
     return {
       annotations: [...action.remainingAnnotations],
     };
   },
 
-  UNHIDE_ANNOTATION: function (state, action) {
-    const anns = state.annotations.map(function (ann) {
+  /**
+   * @param {State} state
+   * @param {{ id: string }} action
+   */
+  UNHIDE_ANNOTATION(state, action) {
+    const anns = state.annotations.map(ann => {
       if (ann.id !== action.id) {
         return ann;
       }
@@ -190,8 +233,12 @@ const update = {
     return { annotations: anns };
   },
 
-  UPDATE_ANCHOR_STATUS: function (state, action) {
-    const annotations = state.annotations.map(function (annot) {
+  /**
+   * @param {State} state
+   * @param {{ statusUpdates: Record<string, AnchorStatus> }} action
+   */
+  UPDATE_ANCHOR_STATUS(state, action) {
+    const annotations = state.annotations.map(annot => {
       if (!action.statusUpdates.hasOwnProperty(annot.$tag)) {
         return annot;
       }
@@ -203,11 +250,15 @@ const update = {
         return Object.assign({}, annot, { $orphan: state === 'orphan' });
       }
     });
-    return { annotations: annotations };
+    return { annotations };
   },
 
-  UPDATE_FLAG_STATUS: function (state, action) {
-    const annotations = state.annotations.map(function (annot) {
+  /**
+   * @param {State} state
+   * @param {{ id: string, isFlagged: boolean }} action
+   */
+  UPDATE_FLAG_STATUS(state, action) {
+    const annotations = state.annotations.map(annot => {
       const match = annot.id && annot.id === action.id;
       if (match) {
         if (annot.flagged === action.isFlagged) {
@@ -219,20 +270,19 @@ const update = {
         });
         if (newAnn.moderation) {
           const countDelta = action.isFlagged ? 1 : -1;
-          newAnn.moderation = Object.assign({}, annot.moderation, {
-            flagCount: annot.moderation.flagCount + countDelta,
-          });
+          newAnn.moderation = {
+            ...newAnn.moderation,
+            flagCount: newAnn.moderation.flagCount + countDelta,
+          };
         }
         return newAnn;
       } else {
         return annot;
       }
     });
-    return { annotations: annotations };
+    return { annotations };
   },
 };
-
-const actions = util.actionTypes(update);
 
 /* Action creators */
 
@@ -242,21 +292,28 @@ const actions = util.actionTypes(update);
  * @param {Annotation[]} annotations - Array of annotation objects to add.
  */
 function addAnnotations(annotations) {
+  /**
+   * @param {import('redux').Dispatch} dispatch
+   * @param {() => { annotations: State, route: import('./route').State }} getState
+   */
   return function (dispatch, getState) {
     const added = annotations.filter(annot => {
-      return !findByID(getState().annotations.annotations, annot.id);
+      return (
+        !annot.id || !findByID(getState().annotations.annotations, annot.id)
+      );
     });
 
-    dispatch({
-      type: actions.ADD_ANNOTATIONS,
-      annotations: annotations,
-      currentAnnotationCount: getState().annotations.annotations.length,
-    });
+    dispatch(
+      makeAction(reducers, 'ADD_ANNOTATIONS', {
+        annotations,
+        currentAnnotationCount: getState().annotations.annotations.length,
+      })
+    );
 
     // If we're not in the sidebar, we're done here.
     // FIXME Split the annotation-adding from the anchoring code; possibly
     // move into service
-    if (route.selectors.route(getState().route) !== 'sidebar') {
+    if (routeModule.selectors.route(getState().route) !== 'sidebar') {
       return;
     }
 
@@ -273,16 +330,16 @@ function addAnnotations(annotations) {
         // Find annotations which haven't yet been anchored in the document.
         const anns = getState().annotations.annotations;
         const annsStillAnchoring = anchoringIDs
-          .map(id => findByID(anns, id))
+          .map(id => (id ? findByID(anns, id) : null))
           .filter(ann => ann && metadata.isWaitingToAnchor(ann));
 
         // Mark anchoring as timed-out for these annotations.
         const anchorStatusUpdates = annsStillAnchoring.reduce(
           (updates, ann) => {
-            updates[ann.$tag] = 'timeout';
+            updates[/** @type {Annotation} */ (ann).$tag] = 'timeout';
             return updates;
           },
-          {}
+          /** @type {Record<string, 'timeout'>} */ ({})
         );
         dispatch(updateAnchorStatus(anchorStatusUpdates));
       }, ANCHORING_TIMEOUT);
@@ -292,7 +349,7 @@ function addAnnotations(annotations) {
 
 /** Set the currently displayed annotations to the empty set. */
 function clearAnnotations() {
-  return { type: actions.CLEAR_ANNOTATIONS };
+  return makeAction(reducers, 'CLEAR_ANNOTATIONS', undefined);
 }
 
 /**
@@ -303,10 +360,7 @@ function clearAnnotations() {
  * @param {string[]} tags - Identifiers of annotations to focus
  */
 function focusAnnotations(tags) {
-  return {
-    type: actions.FOCUS_ANNOTATIONS,
-    focusedTags: tags,
-  };
+  return makeAction(reducers, 'FOCUS_ANNOTATIONS', { focusedTags: tags });
 }
 
 /**
@@ -314,12 +368,11 @@ function focusAnnotations(tags) {
  *
  * This updates an annotation to reflect the fact that it has been hidden from
  * non-moderators.
+ *
+ * @param {string} id
  */
 function hideAnnotation(id) {
-  return {
-    type: actions.HIDE_ANNOTATION,
-    id: id,
-  };
+  return makeAction(reducers, 'HIDE_ANNOTATION', { id });
 }
 
 /**
@@ -333,10 +386,9 @@ function hideAnnotation(id) {
  * @param {string[]} ids - annotations to highlight
  */
 function highlightAnnotations(ids) {
-  return {
-    type: actions.HIGHLIGHT_ANNOTATIONS,
+  return makeAction(reducers, 'HIGHLIGHT_ANNOTATIONS', {
     highlighted: toTrueMap(ids),
-  };
+  });
 }
 
 /**
@@ -347,16 +399,21 @@ function highlightAnnotations(ids) {
  *   only contain an `id` property.
  */
 export function removeAnnotations(annotations) {
+  /**
+   * @param {import('redux').Dispatch} dispatch
+   * @param {() => { annotations: State }} getState
+   */
   return (dispatch, getState) => {
     const remainingAnnotations = excludeAnnotations(
       getState().annotations.annotations,
       annotations
     );
-    dispatch({
-      type: actions.REMOVE_ANNOTATIONS,
-      annotationsToRemove: annotations,
-      remainingAnnotations,
-    });
+    dispatch(
+      makeAction(reducers, 'REMOVE_ANNOTATIONS', {
+        annotationsToRemove: annotations,
+        remainingAnnotations,
+      })
+    );
   };
 }
 
@@ -365,25 +422,20 @@ export function removeAnnotations(annotations) {
  *
  * This updates an annotation to reflect the fact that it has been made visible
  * to non-moderators.
+ *
+ * @param {string} id
  */
 function unhideAnnotation(id) {
-  return {
-    type: actions.UNHIDE_ANNOTATION,
-    id: id,
-  };
+  return makeAction(reducers, 'UNHIDE_ANNOTATION', { id });
 }
 
 /**
  * Update the anchoring status of an annotation
  *
- * @param {{ [tag: string]: 'anchored'|'orphan'|'timeout'} } statusUpdates - A
- *        map of annotation tag to orphan status
+ * @param {Record<string, AnchorStatus>} statusUpdates - Map of annotation tag to orphan status
  */
 function updateAnchorStatus(statusUpdates) {
-  return {
-    type: actions.UPDATE_ANCHOR_STATUS,
-    statusUpdates,
-  };
+  return makeAction(reducers, 'UPDATE_ANCHOR_STATUS', { statusUpdates });
 }
 
 /**
@@ -395,21 +447,16 @@ function updateAnchorStatus(statusUpdates) {
  *
  */
 function updateFlagStatus(id, isFlagged) {
-  return {
-    type: actions.UPDATE_FLAG_STATUS,
-    id: id,
-    isFlagged: isFlagged,
-  };
+  return makeAction(reducers, 'UPDATE_FLAG_STATUS', { id, isFlagged });
 }
 
 /* Selectors */
 
 /**
  * Count the number of annotations (as opposed to notes or orphans)
- *
- * @type {(state: any) => number}
  */
 const annotationCount = createSelector(
+  /** @param {State} state */
   state => state.annotations,
   annotations => countIf(annotations, metadata.isAnnotation)
 );
@@ -417,7 +464,7 @@ const annotationCount = createSelector(
 /**
  * Retrieve all annotations currently in the store
  *
- * @type {(state: any) => Annotation[]}
+ * @param {State} state
  */
 function allAnnotations(state) {
   return state.annotations;
@@ -426,8 +473,8 @@ function allAnnotations(state) {
 /**
  * Does the annotation indicated by `id` exist in the collection?
  *
+ * @param {State} state
  * @param {string} id
- * @return {boolean}
  */
 function annotationExists(state, id) {
   return state.annotations.some(annot => annot.id === id);
@@ -435,6 +482,9 @@ function annotationExists(state, id) {
 
 /**
  * Return the annotation with the given ID
+ *
+ * @param {State} state
+ * @param {string} id
  */
 function findAnnotationByID(state, id) {
   return findByID(state.annotations, id);
@@ -446,35 +496,34 @@ function findAnnotationByID(state, id) {
  * If an annotation does not have an ID because it has not been created on
  * the server, there will be no entry for it in the returned array.
  *
+ * @param {State} state
  * @param {string[]} tags - Local tags of annotations to look up
  */
 function findIDsForTags(state, tags) {
   const ids = [];
-  tags.forEach(tag => {
+  for (let tag of tags) {
     const annot = findByTag(state.annotations, tag);
     if (annot && annot.id) {
       ids.push(annot.id);
     }
-  });
+  }
   return ids;
 }
 
 /**
  * Retrieve currently-focused annotation identifiers
- *
- * @type {(state: any) => string[]}
  */
 const focusedAnnotations = createSelector(
+  /** @param {State} state */
   state => state.focused,
   focused => trueKeys(focused)
 );
 
 /**
  * Retrieve currently-highlighted annotation identifiers
- *
- * @type {(state: any) => string[]}
  */
 const highlightedAnnotations = createSelector(
+  /** @param {State} state */
   state => state.highlighted,
   highlighted => trueKeys(highlighted)
 );
@@ -482,8 +531,8 @@ const highlightedAnnotations = createSelector(
 /**
  * Is the annotation referenced by `$tag` currently focused?
  *
- * @param {string} $tag - annotation identifier
- * @return {boolean}
+ * @param {State} state
+ * @param {string} $tag
  */
 function isAnnotationFocused(state, $tag) {
   return state.focused[$tag] === true;
@@ -491,10 +540,9 @@ function isAnnotationFocused(state, $tag) {
 
 /**
  * Are there any annotations still waiting to anchor?
- *
- * @type {(state: any) => boolean}
  */
 const isWaitingToAnchorAnnotations = createSelector(
+  /** @param {State} state */
   state => state.annotations,
   annotations => annotations.some(metadata.isWaitingToAnchor)
 );
@@ -502,10 +550,9 @@ const isWaitingToAnchorAnnotations = createSelector(
 /**
  * Return all loaded annotations that are not highlights and have not been saved
  * to the server
- *
- * @type {(state: any) => Annotation[]}
  */
 const newAnnotations = createSelector(
+  /** @param {State} state */
   state => state.annotations,
   annotations =>
     annotations.filter(ann => metadata.isNew(ann) && !metadata.isHighlight(ann))
@@ -514,10 +561,9 @@ const newAnnotations = createSelector(
 /**
  * Return all loaded annotations that are highlights and have not been saved
  * to the server
- *
- * @type {(state: any) => Annotation[]}
  */
 const newHighlights = createSelector(
+  /** @param {State} state */
   state => state.annotations,
   annotations =>
     annotations.filter(ann => metadata.isNew(ann) && metadata.isHighlight(ann))
@@ -525,20 +571,18 @@ const newHighlights = createSelector(
 
 /**
  * Count the number of page notes currently in the collection
- *
- @type {(state: any) => number}
  */
 const noteCount = createSelector(
+  /** @param {State} state */
   state => state.annotations,
   annotations => countIf(annotations, metadata.isPageNote)
 );
 
 /**
  * Count the number of orphans currently in the collection
- *
- * @type {(state: any) => number}
  */
 const orphanCount = createSelector(
+  /** @param {State} state */
   state => state.annotations,
   annotations => countIf(annotations, metadata.isOrphan)
 );
@@ -546,19 +590,19 @@ const orphanCount = createSelector(
 /**
  * Return all loaded annotations which have been saved to the server
  *
- * @return {Annotation[]}
+ * @param {State} state
+ * @return {SavedAnnotation[]}
  */
 function savedAnnotations(state) {
-  return state.annotations.filter(function (ann) {
-    return !metadata.isNew(ann);
-  });
+  return /** @type {SavedAnnotation[]} */ (
+    state.annotations.filter(ann => isSaved(ann))
+  );
 }
 
-export default storeModule({
-  init: init,
+export const annotationsModule = createStoreModule(initialState, {
   namespace: 'annotations',
-  update: update,
-  actions: {
+  reducers,
+  actionCreators: {
     addAnnotations,
     clearAnnotations,
     focusAnnotations,

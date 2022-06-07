@@ -8,12 +8,13 @@
  * specific user) or `'group'` (for a group).
  *
  * @typedef Permissions
- * @property {string[]} read - List of principals that can read the annotation
- * @property {string[]} update - List of principals that can edit the annotation
- * @property {string[]} delete - List of principals that can delete the
+ * @prop {string[]} read - List of principals that can read the annotation
+ * @prop {string[]} update - List of principals that can edit the annotation
+ * @prop {string[]} delete - List of principals that can delete the
  * annotation
  */
 
+/** @param {string|null} savedLevel */
 function defaultLevel(savedLevel) {
   switch (savedLevel) {
     case 'private':
@@ -60,6 +61,7 @@ export function sharedPermissions(userid, groupid) {
  * @param {string} userid - User ID of the author
  * @param {string} groupid - ID of the group the annotation is being shared
  * with
+ * @param {string|null} savedLevel
  * @return {Permissions}
  */
 export function defaultPermissions(userid, groupid, savedLevel) {
@@ -78,7 +80,7 @@ export function defaultPermissions(userid, groupid, savedLevel) {
  * @return {boolean}
  */
 export function isShared(perms) {
-  return perms.read.some(function (principal) {
+  return perms.read.some(principal => {
     return principal.indexOf('group:') === 0;
   });
 }

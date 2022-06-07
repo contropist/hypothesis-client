@@ -1,67 +1,70 @@
 import { render } from 'preact';
-import Buckets from './components/Buckets';
 
-import { anchorBuckets } from './util/buckets';
-import { ListenerCollection } from './util/listener-collection';
+import Buckets from './components/Buckets';
+import { computeBuckets } from './util/buckets';
 
 /**
- * @typedef BucketBarOptions
- * @prop {Element} [contentContainer] - The scrollable container element for the
- *   document content. All of the highlights that the bucket bar's buckets point
- *   at should be contained within this element.
+ * @typedef {import('../types/annotator').AnchorPosition} AnchorPosition
+ * @typedef {import('../types/annotator').Destroyable} Destroyable
  */
 
-export default class BucketBar {
+/**
+ * Controller for the "bucket bar" shown alongside the sidebar indicating where
+ * annotations are in the document.
+ *
+ * @implements {Destroyable}
+ */
+export class BucketBar {
   /**
    * @param {HTMLElement} container
-   * @param {Pick<import('./guest').default, 'anchors'|'selectAnnotations'>} guest
-   * @param {BucketBarOptions} [options]
+   * @param {object} options
+   *   @param {(tags: string[]) => void} options.onFocusAnnotations
+   *   @param {(tags: string[], direction: 'down'|'up') => void} options.onScrollToClosestOffScreenAnchor
+   *   @param {(tags: string[], toggle: boolean) => void} options.onSelectAnnotations
    */
-  constructor(container, guest, { contentContainer = document.body } = {}) {
-    this._contentContainer = contentContainer;
-    this.element = document.createElement('div');
+  constructor(
+    container,
+    {
+      onFocusAnnotations,
+      onScrollToClosestOffScreenAnchor,
+      onSelectAnnotations,
+    }
+  ) {
+    this._bucketsContainer = document.createElement('div');
+    container.appendChild(this._bucketsContainer);
 
-    this.guest = guest;
-    container.appendChild(this.element);
+    this._onFocusAnnotations = onFocusAnnotations;
+    this._onScrollToClosestOffScreenAnchor = onScrollToClosestOffScreenAnchor;
+    this._onSelectAnnotations = onSelectAnnotations;
 
-    this._listeners = new ListenerCollection();
-
-    this._listeners.add(window, 'resize', () => this.update());
-    this._listeners.add(window, 'scroll', () => this.update());
-    this._listeners.add(contentContainer, 'scroll', () => this.update());
-
-    // Immediately render the buckets for the current anchors.
-    this._update();
+    // Immediately render the bucket bar
+    this.update([]);
   }
 
   destroy() {
-    this._listeners.removeAll();
-    this.element.remove();
+    render(null, this._bucketsContainer);
+    this._bucketsContainer.remove();
   }
 
-  update() {
-    if (this._updatePending) {
-      return;
-    }
-    this._updatePending = true;
-    requestAnimationFrame(() => {
-      this._update();
-      this._updatePending = false;
-    });
-  }
-
-  _update() {
-    const buckets = anchorBuckets(this.guest.anchors);
+  /**
+   * @param {AnchorPosition[]} positions
+   */
+  update(positions) {
+    const buckets = computeBuckets(positions);
     render(
       <Buckets
         above={buckets.above}
         below={buckets.below}
         buckets={buckets.buckets}
-        onSelectAnnotations={(annotations, toggle) =>
-          this.guest.selectAnnotations(annotations, toggle)
+        onFocusAnnotations={tags => this._onFocusAnnotations(tags)}
+        onScrollToClosestOffScreenAnchor={(tags, direction) =>
+          this._onScrollToClosestOffScreenAnchor(tags, direction)
+        }
+        onSelectAnnotations={(tags, toogle) =>
+          this._onSelectAnnotations(tags, toogle)
         }
       />,
-      this.element
+      this._bucketsContainer
     );
   }
 }

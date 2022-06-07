@@ -1,10 +1,9 @@
 import { mount } from 'enzyme';
 
-import MenuKeyboardNavigation from '../MenuKeyboardNavigation';
-import { $imports } from '../MenuKeyboardNavigation';
+import MenuKeyboardNavigation, { $imports } from '../MenuKeyboardNavigation';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
 describe('MenuKeyboardNavigation', () => {
   let fakeCloseMenu;
@@ -70,7 +69,6 @@ describe('MenuKeyboardNavigation', () => {
     });
 
     it('sets focus to the first `menuitem` child when `visible` is true', () => {
-      const clock = sinon.useFakeTimers();
       createMenuItem({ visible: true });
       clock.tick(1);
       assert.equal(document.activeElement.innerText, 'Item 1');

@@ -1,5 +1,11 @@
+import { entries } from '../util/collections';
 import { watch } from '../util/watch';
 
+/**
+ * @typedef {import('../store/modules/defaults').Key} Key
+ */
+
+/** @type {Record<Key, string>} */
 const DEFAULT_KEYS = {
   annotationPrivacy: 'hypothesis.privacy',
   focusedGroup: 'hypothesis.groups.focus',
@@ -30,24 +36,27 @@ export class PersistedDefaultsService {
     /**
      * Store subscribe callback for persisting changes to defaults. It will only
      * persist defaults that it "knows about" via `DEFAULT_KEYS`.
+     *
+     * @param {Record<Key, any>} defaults
+     * @param {Record<Key, any>} prevDefaults
      */
     const persistChangedDefaults = (defaults, prevDefaults) => {
-      for (let defaultKey in defaults) {
+      for (let [defaultKey, newValue] of entries(defaults)) {
         if (
-          prevDefaults[defaultKey] !== defaults[defaultKey] &&
+          prevDefaults[defaultKey] !== newValue &&
           defaultKey in DEFAULT_KEYS
         ) {
-          this._storage.setItem(DEFAULT_KEYS[defaultKey], defaults[defaultKey]);
+          this._storage.setItem(DEFAULT_KEYS[defaultKey], newValue);
         }
       }
     };
 
     // Read persisted defaults into the store
-    Object.keys(DEFAULT_KEYS).forEach(defaultKey => {
+    for (let [defaultKey, key] of entries(DEFAULT_KEYS)) {
       // `localStorage.getItem` will return `null` for a non-existent key
-      const defaultValue = this._storage.getItem(DEFAULT_KEYS[defaultKey]);
+      const defaultValue = this._storage.getItem(key);
       this._store.setDefault(defaultKey, defaultValue);
-    });
+    }
 
     // Listen for changes to those defaults from the store and persist them
     watch(

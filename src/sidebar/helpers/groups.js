@@ -1,12 +1,12 @@
 /**
- * @typedef {import('../../types/config').HostConfig} HostConfig
+ * @typedef {import('../../types/config').SidebarSettings} SidebarSettings
  * @typedef {import('../../types/api').Group} Group
+ * @typedef {import('../../types/api').GroupIdentifier} GroupIdentifier
  */
 
-// @ts-expect-error - Ignore error about default-importing a CommonJS module.
 import escapeStringRegexp from 'escape-string-regexp';
 
-import serviceConfig from '../config/service-config';
+import { serviceConfig } from '../config/service-config';
 
 /**
  * Should users be able to leave private groups of which they
@@ -14,7 +14,7 @@ import serviceConfig from '../config/service-config';
  * explicitly disallowed in the service configuration of the
  * `settings` object.
  *
- * @param {HostConfig} settings
+ * @param {SidebarSettings} settings
  * @return {boolean}
  */
 function allowLeavingGroups(settings) {
@@ -34,7 +34,7 @@ function allowLeavingGroups(settings) {
  * @param {Group[]} userGroups - groups the user is a member of
  * @param {Group[]} featuredGroups - all other groups, may include some duplicates from the userGroups
  * @param {string|null} uri - uri of the current page
- * @param {HostConfig} settings
+ * @param {SidebarSettings} settings
  */
 export function combineGroups(userGroups, featuredGroups, uri, settings) {
   const worldGroup = featuredGroups.find(g => g.id === '__world__');
@@ -84,6 +84,10 @@ function isScopedToUri(group, uri) {
   return true;
 }
 
+/**
+ * @param {string} uri
+ * @param {string[]} scopes
+ */
 function uriMatchesScopes(uri, scopes) {
   return (
     scopes.find(uriRegex =>
@@ -93,4 +97,32 @@ function uriMatchesScopes(uri, scopes) {
       )
     ) !== undefined
   );
+}
+
+/**
+ * Find groups in `groups` by GroupIdentifier, which may be either an `id` or
+ * `groupid`.
+ *
+ * @param {GroupIdentifier[]} groupIds
+ * @param {Group[]} groups
+ * @return {Group[]}
+ */
+function findGroupsByAnyIds(groupIds, groups) {
+  return groups.filter(
+    g => groupIds.includes(g.id) || (g.groupid && groupIds.includes(g.groupid))
+  );
+}
+
+/**
+ * Attempt to convert a list in which each entry might be either an `id`
+ * (pubid) or a `groupid` into a list of `id`s by locating associated groups
+ * in the set of all `groups`. Only return entries for groups that can be
+ * found in `groups`.
+ *
+ * @param {GroupIdentifier[]} groupIds
+ * @param {Group[]} groups
+ * @return {Group["id"][]}
+ */
+export function normalizeGroupIds(groupIds, groups) {
+  return findGroupsByAnyIds(groupIds, groups).map(g => g.id);
 }

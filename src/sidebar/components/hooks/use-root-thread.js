@@ -1,7 +1,7 @@
 import { useMemo } from 'preact/hooks';
 
-import { useStoreProxy } from '../../store/use-store';
-import threadAnnotations from '../../helpers/thread-annotations';
+import { useSidebarStore } from '../../store';
+import { threadAnnotations } from '../../helpers/thread-annotations';
 
 /** @typedef {import('../../helpers/build-thread').Thread} Thread */
 
@@ -11,8 +11,8 @@ import threadAnnotations from '../../helpers/thread-annotations';
  *
  * @return {Thread}
  */
-export default function useRootThread() {
-  const store = useStoreProxy();
+export function useRootThread() {
+  const store = useSidebarStore();
   const annotations = store.allAnnotations();
   const query = store.filterQuery();
   const route = store.route();
@@ -20,7 +20,7 @@ export default function useRootThread() {
   const filters = store.getFilterValues();
 
   const threadState = useMemo(() => {
-    /** @type {Object.<string,string>} */
+    /** @type {Record<string,string>} */
     return {
       annotations,
       route,

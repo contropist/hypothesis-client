@@ -1,11 +1,10 @@
 import { mount } from 'enzyme';
 
-import FilterSelect from '../FilterSelect';
-import { $imports } from '../FilterSelect';
+import FilterSelect, { $imports } from '../FilterSelect';
 
 import { checkAccessibility } from '../../../test-util/accessibility';
 
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 
 describe('FilterSelect', () => {
   let someOptions;
@@ -65,12 +64,12 @@ describe('FilterSelect', () => {
     const wrapper = createComponent({ icon: 'profile' });
 
     const label = mount(wrapper.find('Menu').props().label);
-    const icon = label.find('SvgIcon');
+    const icon = label.find('Icon');
 
     assert.isTrue(icon.exists());
     assert.equal(icon.props().name, 'profile');
     // Default option should be selected as we didn't indicate a selected option
-    assert.equal(label.text(), 'all');
+    assert.include(label.text(), 'all');
   });
 
   it('should render provided title', () => {

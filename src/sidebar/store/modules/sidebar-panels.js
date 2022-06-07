@@ -12,32 +12,39 @@
  * @typedef {import("../../../types/sidebar").PanelName} PanelName
  */
 
-import * as util from '../util';
+import { createStoreModule, makeAction } from '../create-store';
 
-import { storeModule } from '../create-store';
+const initialState = {
+  /**
+   * The `panelName` of the currently-active sidebar panel.
+   * Only one `panelName` may be active at a time, but it is valid (though not
+   * the standard use case) for multiple `SidebarPanel` components to share
+   * the same `panelName`—`panelName` is not intended as a unique ID/key.
+   *
+   * e.g. If `activePanelName` were `foobar`, all `SidebarPanel` components
+   * with `panelName` of `foobar` would be active, and thus visible.
+   *
+   * @type {PanelName|null}
+   */
+  activePanelName: null,
+};
 
-function init() {
-  return {
-    /*
-     * The `panelName` of the currently-active sidebar panel.
-     * Only one `panelName` may be active at a time, but it is valid (though not
-     * the standard use case) for multiple `SidebarPanel` components to share
-     * the same `panelName`—`panelName` is not intended as a unique ID/key.
-     *
-     * e.g. If `activePanelName` were `foobar`, all `SidebarPanel` components
-     * with `panelName` of `foobar` would be active, and thus visible.
-     *
-     */
-    activePanelName: null,
-  };
-}
+/** @typedef {typeof initialState} State */
 
-const update = {
-  OPEN_SIDEBAR_PANEL: function (state, action) {
+const reducers = {
+  /**
+   * @param {State} state
+   * @param {{ panelName: PanelName }} action
+   */
+  OPEN_SIDEBAR_PANEL(state, action) {
     return { activePanelName: action.panelName };
   },
 
-  CLOSE_SIDEBAR_PANEL: function (state, action) {
+  /**
+   * @param {State} state
+   * @param {{ panelName: PanelName }} action
+   */
+  CLOSE_SIDEBAR_PANEL(state, action) {
     let activePanelName = state.activePanelName;
     if (action.panelName === activePanelName) {
       // `action.panelName` is indeed the currently-active panel; deactivate
@@ -49,6 +56,10 @@ const update = {
     };
   },
 
+  /**
+   * @param {State} state
+   * @param {{ panelName: PanelName, panelState?: boolean }} action
+   */
   TOGGLE_SIDEBAR_PANEL: function (state, action) {
     let activePanelName;
     // Is the panel in question currently the active panel?
@@ -76,15 +87,13 @@ const update = {
   },
 };
 
-const actions = util.actionTypes(update);
-
 /**
  * Designate `panelName` as the currently-active panel name
  *
  * @param {PanelName} panelName
  */
 function openSidebarPanel(panelName) {
-  return { type: actions.OPEN_SIDEBAR_PANEL, panelName: panelName };
+  return makeAction(reducers, 'OPEN_SIDEBAR_PANEL', { panelName });
 }
 
 /**
@@ -93,7 +102,7 @@ function openSidebarPanel(panelName) {
  * @param {PanelName} panelName
  */
 function closeSidebarPanel(panelName) {
-  return { type: actions.CLOSE_SIDEBAR_PANEL, panelName: panelName };
+  return makeAction(reducers, 'CLOSE_SIDEBAR_PANEL', { panelName });
 }
 
 /**
@@ -105,29 +114,27 @@ function closeSidebarPanel(panelName) {
  *   Should the panel be active? Omit this prop to simply toggle the value.
  */
 function toggleSidebarPanel(panelName, panelState) {
-  return {
-    type: actions.TOGGLE_SIDEBAR_PANEL,
-    panelName: panelName,
-    panelState: panelState,
-  };
+  return makeAction(reducers, 'TOGGLE_SIDEBAR_PANEL', {
+    panelName,
+    panelState,
+  });
 }
 
 /**
  * Is the panel indicated by `panelName` currently active (open)?
  *
+ * @param {State} state
  * @param {PanelName} panelName
- * @return {boolean} - `true` if `panelName` is the currently-active panel
  */
 function isSidebarPanelOpen(state, panelName) {
   return state.activePanelName === panelName;
 }
 
-export default storeModule({
+export const sidebarPanelsModule = createStoreModule(initialState, {
   namespace: 'sidebarPanels',
-  init: init,
-  update: update,
+  reducers,
 
-  actions: {
+  actionCreators: {
     openSidebarPanel,
     closeSidebarPanel,
     toggleSidebarPanel,

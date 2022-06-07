@@ -1,10 +1,11 @@
 /**
  * Wait for a condition to evaluate to a truthy value.
  *
- * @param {() => any} condition - Function that returns a truthy value when some condition is met
+ * @template T
+ * @param {() => T} condition - Function that returns a truthy value when some condition is met
  * @param {number} timeout - Max delay in milliseconds to wait
  * @param {string} what - Description of condition that is being waited for
- * @return {Promise<any>} - Result of the `condition` function
+ * @return {Promise<T>} - Result of the `condition` function
  */
 export async function waitFor(
   condition,
@@ -31,4 +32,9 @@ export async function waitFor(
       }
     });
   });
+}
+
+/** @param {number} ms */
+export function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

@@ -1,15 +1,13 @@
 import { mount } from 'enzyme';
 
-import bridgeEvents from '../../../shared/bridge-events';
-import mockImportedComponents from '../../../test-util/mock-imported-components';
-
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 import HypothesisApp, { $imports } from '../HypothesisApp';
 
 describe('HypothesisApp', () => {
   let fakeApplyTheme;
   let fakeStore = null;
   let fakeAuth = null;
-  let fakeBridge = null;
+  let fakeFrameSync;
   let fakeConfirm;
   let fakeServiceConfig = null;
   let fakeSession = null;
@@ -21,7 +19,7 @@ describe('HypothesisApp', () => {
     return mount(
       <HypothesisApp
         auth={fakeAuth}
-        bridge={fakeBridge}
+        frameSync={fakeFrameSync}
         settings={fakeSettings}
         session={fakeSession}
         toastMessenger={fakeToastMessenger}
@@ -67,8 +65,8 @@ describe('HypothesisApp', () => {
 
     fakeSettings = {};
 
-    fakeBridge = {
-      call: sinon.stub(),
+    fakeFrameSync = {
+      notifyHost: sinon.stub(),
     };
 
     fakeToastMessenger = {
@@ -80,8 +78,8 @@ describe('HypothesisApp', () => {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      '../config/service-config': fakeServiceConfig,
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      '../config/service-config': { serviceConfig: fakeServiceConfig },
+      '../store': { useSidebarStore: () => fakeStore },
       '../helpers/session': {
         shouldAutoDisplayTutorial: fakeShouldAutoDisplayTutorial,
       },
@@ -182,7 +180,6 @@ describe('HypothesisApp', () => {
         status: 'logged-in',
         userid: 'acct:jim@hypothes.is',
         username: 'jim',
-        provider: 'hypothes.is',
         displayName: 'Jim Smith',
       },
     },
@@ -198,7 +195,6 @@ describe('HypothesisApp', () => {
         status: 'logged-in',
         userid: 'acct:jim@hypothes.is',
         username: 'jim',
-        provider: 'hypothes.is',
         displayName: 'jim',
       },
     },
@@ -227,10 +223,10 @@ describe('HypothesisApp', () => {
         fakeServiceConfig.returns({});
       });
 
-      it('sends SIGNUP_REQUESTED event', () => {
+      it('sends "signupRequested" event', () => {
         const wrapper = createComponent();
         clickSignUp(wrapper);
-        assert.calledWith(fakeBridge.call, bridgeEvents.SIGNUP_REQUESTED);
+        assert.calledWith(fakeFrameSync.notifyHost, 'signupRequested');
       });
 
       it('does not open a URL directly', () => {
@@ -291,19 +287,18 @@ describe('HypothesisApp', () => {
       assert.called(fakeToastMessenger.error);
     });
 
-    it('sends LOGIN_REQUESTED event to host page if using a third-party service', async () => {
+    it('sends "loginRequested" event to host page if using a third-party service', async () => {
       // If the client is using a third-party annotation service then clicking
-      // on a login button should send the LOGIN_REQUESTED event over the bridge
-      // (so that the partner site we're embedded in can do its own login
-      // thing).
+      // on a login button should notify the host frame (so that the partner
+      // site we're embedded in can do its own login thing).
       fakeServiceConfig.returns({});
 
       const wrapper = createComponent();
       await clickLogIn(wrapper);
 
-      assert.equal(fakeBridge.call.callCount, 1);
+      assert.equal(fakeFrameSync.notifyHost.callCount, 1);
       assert.isTrue(
-        fakeBridge.call.calledWithExactly(bridgeEvents.LOGIN_REQUESTED)
+        fakeFrameSync.notifyHost.calledWithExactly('loginRequested')
       );
     });
   });
@@ -406,25 +401,22 @@ describe('HypothesisApp', () => {
 
       addCommonLogoutTests();
 
-      it('sends LOGOUT_REQUESTED', async () => {
+      it('sends "logoutRequested"', async () => {
         const wrapper = createComponent();
         await clickLogOut(wrapper);
 
-        assert.calledOnce(fakeBridge.call);
-        assert.calledWithExactly(
-          fakeBridge.call,
-          bridgeEvents.LOGOUT_REQUESTED
-        );
+        assert.calledOnce(fakeFrameSync.notifyHost);
+        assert.calledWithExactly(fakeFrameSync.notifyHost, 'logoutRequested');
       });
 
-      it('does not send LOGOUT_REQUESTED if the user cancels the prompt', async () => {
+      it('does not send "logoutRequested" if the user cancels the prompt', async () => {
         fakeStore.countDrafts.returns(1);
         fakeConfirm.returns(false);
 
         const wrapper = createComponent();
         await clickLogOut(wrapper);
 
-        assert.notCalled(fakeBridge.call);
+        assert.notCalled(fakeFrameSync.notifyHost);
       });
 
       it('does not call session.logout()', async () => {
@@ -436,33 +428,34 @@ describe('HypothesisApp', () => {
   });
 
   describe('theming', () => {
+    const appSelector = '[data-testid="hypothesis-app"]';
     it('applies theme config', () => {
       const style = { backgroundColor: 'red' };
       fakeApplyTheme.returns({ backgroundColor: 'red' });
 
       const wrapper = createComponent();
-      const background = wrapper.find('.HypothesisApp');
+      const background = wrapper.find(appSelector);
 
       assert.calledWith(fakeApplyTheme, ['appBackgroundColor'], fakeSettings);
       assert.deepEqual(background.prop('style'), style);
     });
-  });
 
-  it('applies a clean-theme style when config sets theme to "clean"', () => {
-    fakeSettings.theme = 'clean';
+    it('applies a clean-theme style when config sets theme to "clean"', () => {
+      fakeSettings.theme = 'clean';
 
-    const wrapper = createComponent();
-    const container = wrapper.find('.HypothesisApp');
+      const wrapper = createComponent();
+      const container = wrapper.find(appSelector);
 
-    assert.isTrue(container.hasClass('theme-clean'));
-  });
+      assert.isTrue(container.hasClass('theme-clean'));
+    });
 
-  it('does not apply clean-theme style when config does not assert `clean` theme', () => {
-    fakeSettings.theme = '';
+    it('does not apply clean-theme style when config does not assert `clean` theme', () => {
+      fakeSettings.theme = '';
 
-    const wrapper = createComponent();
-    const container = wrapper.find('.HypothesisApp');
+      const wrapper = createComponent();
+      const container = wrapper.find(appSelector);
 
-    assert.isFalse(container.hasClass('HypothesisApp--theme-clean'));
+      assert.isFalse(container.hasClass('theme-clean'));
+    });
   });
 });

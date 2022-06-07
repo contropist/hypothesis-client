@@ -1,6 +1,6 @@
 import { mount } from 'enzyme';
 
-import mockImportedComponents from '../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../test-util/mock-imported-components';
 import { waitFor } from '../../../test-util/wait';
 
 import StreamView, { $imports } from '../StreamView';
@@ -30,7 +30,6 @@ describe('StreamView', () => {
       annotationFetchStarted: sinon.stub(),
       annotationFetchFinished: sinon.stub(),
       clearAnnotations: sinon.spy(),
-      getState: sinon.stub().returns({}),
       routeParams: sinon.stub().returns({ id: 'test' }),
       setSortKey: sinon.spy(),
     };
@@ -41,8 +40,8 @@ describe('StreamView', () => {
 
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
-      './hooks/use-root-thread': fakeUseRootThread,
-      '../store/use-store': { useStoreProxy: () => fakeStore },
+      './hooks/use-root-thread': { useRootThread: fakeUseRootThread },
+      '../store': { useSidebarStore: () => fakeStore },
       '../util/search-filter': fakeSearchFilter,
     });
   });

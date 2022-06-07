@@ -11,9 +11,11 @@ import { APIService } from '../api';
 //
 // `curl https://hypothes.is/api/ | sed 's/hypothes.is/example.com/g' | jq . > api-index.json`
 //
-const routes = require('./api-index.json').links;
+import apiIndex from './api-index.json';
+const routes = apiIndex.links;
 
 describe('APIService', () => {
+  let fakeApiRoutes;
   let fakeAuth;
   let fakeStore;
   let api;
@@ -36,7 +38,7 @@ describe('APIService', () => {
    * @param {number|null} status -
    *   Expected HTTP status. If `null` then the call to `fetch` will reject with
    *   the content of `body` as the error message.
-   * @param {Object|string} body - Expected response body or error message
+   * @param {object|string} body - Expected response body or error message
    */
   function expectCall(
     method,
@@ -60,7 +62,7 @@ describe('APIService', () => {
   }
 
   beforeEach(() => {
-    const fakeApiRoutes = {
+    fakeApiRoutes = {
       links: sinon.stub(),
       routes: sinon.stub().returns(Promise.resolve(routes)),
     };
@@ -156,6 +158,31 @@ describe('APIService', () => {
     return api.search({ uri: 'http://foobar.com/?foo=bar;baz=qux' });
   });
 
+  // Test that covers the most critical use case of multiple values being
+  // provided for an API parameter. Other API calls accept multiple values
+  // as well though.
+  it('repeats query parameters when multiple values are provided', () => {
+    const pdfURL = 'https://example.com/test.pdf';
+    const fingerprintURL = 'urn:x-pdf:foobar';
+
+    expectCall(
+      'get',
+      `search?uri=${encodeURIComponent(pdfURL)}&uri=${encodeURIComponent(
+        fingerprintURL
+      )}`
+    );
+
+    return api.search({ uri: [pdfURL, fingerprintURL] });
+  });
+
+  // Test serialization of nullish parameters in API calls. This behavior matches
+  // the query-string package that we used to use.
+  it('sends empty query parameters if value is nullish', () => {
+    expectCall('get', 'search?c=false');
+
+    return api.search({ a: undefined, b: null, c: false, d: [null] });
+  });
+
   it("fetches the user's profile", () => {
     const profile = { userid: 'acct:user@publisher.org' };
     expectCall('get', 'profile?authority=publisher.org', 200, profile);
@@ -175,8 +202,7 @@ describe('APIService', () => {
         // Network error
         status: null,
         body: 'Service unreachable.',
-        expectedMessage:
-          "Fetch operation failed for URL 'https://example.com/api/profile'",
+        expectedMessage: 'Network request failed: Service unreachable.',
       },
       {
         // Request failed with an error given in the JSON body
@@ -185,14 +211,15 @@ describe('APIService', () => {
         body: {
           reason: 'Thing not found',
         },
-        expectedMessage: '404 Not Found: Thing not found',
+        expectedMessage: 'Network request failed (404): Thing not found',
       },
       {
         // Request failed with a non-JSON response
         status: 500,
         statusText: 'Server Error',
         body: 'Internal Server Error',
-        expectedMessage: '500 Internal Server Error',
+        expectedMessage:
+          'Network request failed (500): Failed to parse response',
       },
     ].forEach(({ status, body, expectedMessage }) => {
       it('rejects the call with an error', () => {
@@ -205,7 +232,7 @@ describe('APIService', () => {
     });
   });
 
-  it('API calls return just the JSON response if `includeMetadata` is false', () => {
+  it('API calls return the JSON response', () => {
     expectCall('get', 'profile', 200, { userid: 'acct:user@example.com' });
     return api.profile.read({}).then(response => {
       assert.match(
@@ -215,23 +242,6 @@ describe('APIService', () => {
         })
       );
     });
-  });
-
-  it('API calls return an `APIResponse` if `includeMetadata` is true', () => {
-    expectCall('get', 'profile', 200, { userid: 'acct:user@example.com' });
-    return api.profile
-      .read({}, null, { includeMetadata: true })
-      .then(response => {
-        assert.match(
-          response,
-          sinon.match({
-            data: {
-              userid: 'acct:user@example.com',
-            },
-            token: 'faketoken',
-          })
-        );
-      });
   });
 
   it('omits Authorization header if no access token is available', () => {
@@ -301,6 +311,39 @@ describe('APIService', () => {
     return api.profile.read({}).then(() => {
       const [, options] = fetchMock.lastCall();
       assert.equal(options.headers['X-Client-Id'], '1234-5678');
+    });
+  });
+
+  [
+    // `profile.read` route is missing
+    {},
+    { profile: {} },
+    // `profile` is a route instead of a route map
+    {
+      profile: {
+        method: 'GET',
+        url: 'https://hypothes.is/api/profile',
+        desc: "Fetch the user's profile",
+      },
+    },
+    // `profile.read` is a route map instead of a route
+    { profile: { read: { subroute: {} } } },
+  ].forEach(routes => {
+    it('throws if API route is missing from /api/ response', async () => {
+      expectCall('get', 'profile');
+      fakeApiRoutes.routes.resolves(routes);
+
+      const api = new APIService(fakeApiRoutes, fakeAuth, fakeStore);
+
+      let error;
+      try {
+        await api.profile.read({});
+      } catch (e) {
+        error = e;
+      }
+
+      assert.instanceOf(error, Error);
+      assert.equal(error.message, 'Missing API route: profile.read');
     });
   });
 });

@@ -16,7 +16,7 @@ import {
  *
  * This is used to test PDF-specific highlighting behavior.
  */
-function PdfPage({ showPlaceholder = false }) {
+function PDFPage({ showPlaceholder = false }) {
   return (
     <div className="page">
       <div className="canvasWrapper">
@@ -45,11 +45,11 @@ function PdfPage({ showPlaceholder = false }) {
 /**
  * Highlight the text in a fake PDF page.
  *
- * @param {HTMLElement} pageContainer - HTML element into which `PdfPage`
+ * @param {HTMLElement} pageContainer - HTML element into which `PDFPage`
  *   component has been rendered
  * @return {HTMLElement} - `<hypothesis-highlight>` element
  */
-function highlightPdfRange(pageContainer) {
+function highlightPDFRange(pageContainer) {
   const textSpan = pageContainer.querySelector('.testText');
   const range = new Range();
   range.setStartBefore(textSpan.childNodes[0]);
@@ -58,15 +58,15 @@ function highlightPdfRange(pageContainer) {
 }
 
 /**
- * Render a fake PDF.js page (`PdfPage`) and return its container.
+ * Render a fake PDF.js page (`PDFPage`) and return its container.
  *
  * @return {HTMLElement}
  */
-function createPdfPageWithHighlight() {
+function createPDFPageWithHighlight() {
   const container = document.createElement('div');
-  render(<PdfPage />, container);
+  render(<PDFPage />, container);
 
-  highlightPdfRange(container);
+  highlightPDFRange(container);
 
   return container;
 }
@@ -245,15 +245,15 @@ describe('annotator/highlighter', () => {
 
     context('when the highlighted text is part of a PDF.js text layer', () => {
       it("removes the highlight element's background color", () => {
-        const page = createPdfPageWithHighlight();
+        const page = createPDFPageWithHighlight();
         const highlight = page.querySelector('hypothesis-highlight');
         assert.isTrue(highlight.classList.contains('is-transparent'));
       });
 
       it('creates an SVG layer above the PDF canvas and draws a highlight in that', () => {
-        const page = createPdfPageWithHighlight();
+        const page = createPDFPageWithHighlight();
         const canvas = page.querySelector('canvas');
-        const svgLayer = page.querySelector('svg');
+        const svgLayer = page.querySelector('svg.hypothesis-highlight-layer');
 
         // Verify SVG layer was created.
         assert.ok(svgLayer);
@@ -264,14 +264,15 @@ describe('annotator/highlighter', () => {
         const svgRect = page.querySelector('rect');
         assert.ok(svgRect);
         assert.equal(highlight.svgHighlight, svgRect);
+        assert.equal(svgRect.getAttribute('class'), 'hypothesis-svg-highlight');
       });
 
       it('re-uses the existing SVG layer for the page if present', () => {
         // Create a PDF page with a single highlight.
-        const page = createPdfPageWithHighlight();
+        const page = createPDFPageWithHighlight();
 
         // Create a second highlight on the same page.
-        highlightPdfRange(page);
+        highlightPDFRange(page);
 
         // There should be multiple highlights.
         assert.equal(page.querySelectorAll('hypothesis-highlight').length, 2);
@@ -287,7 +288,7 @@ describe('annotator/highlighter', () => {
 
       it('does not create an SVG highlight if the canvas is not found', () => {
         const container = document.createElement('div');
-        render(<PdfPage />, container);
+        render(<PDFPage />, container);
 
         // Remove canvas. This might be missing if the DOM structure looks like
         // PDF.js but isn't, or perhaps a future PDF.js update or fork changes
@@ -295,7 +296,7 @@ describe('annotator/highlighter', () => {
         // regular CSS-based highlighting.
         container.querySelector('canvas').remove();
 
-        const [highlight] = highlightPdfRange(container);
+        const [highlight] = highlightPDFRange(container);
 
         assert.isFalse(highlight.classList.contains('is-transparent'));
         assert.isNull(container.querySelector('rect'));
@@ -304,8 +305,8 @@ describe('annotator/highlighter', () => {
 
       it('does not create an SVG highlight for placeholder highlights', () => {
         const container = document.createElement('div');
-        render(<PdfPage showPlaceholder={true} />, container);
-        const [highlight] = highlightPdfRange(container);
+        render(<PDFPage showPlaceholder={true} />, container);
+        const [highlight] = highlightPDFRange(container);
 
         // If the highlight is a placeholder, the highlight element should still
         // be created.
@@ -315,53 +316,6 @@ describe('annotator/highlighter', () => {
         // ...but the highlight should be visually hidden so the SVG should
         // not be created.
         assert.isNull(container.querySelector('rect'));
-      });
-
-      describe('CSS blend mode support testing', () => {
-        beforeEach(() => {
-          sinon.stub(CSS, 'supports');
-        });
-
-        afterEach(() => {
-          CSS.supports.restore();
-        });
-
-        it('renders highlights when mix-blend-mode is supported', () => {
-          const container = document.createElement('div');
-          render(<PdfPage />, container);
-          CSS.supports.withArgs('mix-blend-mode', 'multiply').returns(true);
-
-          highlightPdfRange(container);
-
-          // When mix blending is available, the highlight layer has default
-          // opacity and highlight rects are transparent.
-          const highlightLayer = container.querySelector(
-            '.hypothesis-highlight-layer'
-          );
-          assert.equal(highlightLayer.style.opacity, '');
-          const rect = container.querySelector('rect');
-          assert.equal(rect.getAttribute('class'), 'hypothesis-svg-highlight');
-        });
-
-        it('renders highlights when mix-blend-mode is not supported', () => {
-          const container = document.createElement('div');
-          render(<PdfPage />, container);
-          CSS.supports.withArgs('mix-blend-mode', 'multiply').returns(false);
-
-          highlightPdfRange(container);
-
-          // When mix blending is not available, highlight rects are opaque and
-          // the entire highlight layer is transparent.
-          const highlightLayer = container.querySelector(
-            '.hypothesis-highlight-layer'
-          );
-          assert.equal(highlightLayer.style.opacity, '0.3');
-          const rect = container.querySelector('rect');
-          assert.include(
-            rect.getAttribute('class'),
-            'hypothesis-svg-highlight is-opaque'
-          );
-        });
       });
     });
   });
@@ -391,7 +345,7 @@ describe('annotator/highlighter', () => {
     });
 
     it('removes any associated SVG elements external to the highlight element', () => {
-      const page = createPdfPageWithHighlight();
+      const page = createPDFPageWithHighlight();
       const highlight = page.querySelector('hypothesis-highlight');
 
       assert.instanceOf(highlight.svgHighlight, SVGElement);
@@ -475,8 +429,8 @@ describe('annotator/highlighter', () => {
 
     it('adds class to PDF highlights when focused', () => {
       const root = document.createElement('div');
-      render(<PdfPage />, root);
-      const highlights = highlightPdfRange(root);
+      render(<PDFPage />, root);
+      const highlights = highlightPDFRange(root);
 
       setHighlightsFocused(highlights, true);
 
@@ -485,10 +439,27 @@ describe('annotator/highlighter', () => {
       );
     });
 
+    it('raises focused highlights in PDFs', () => {
+      const root = document.createElement('div');
+      render(<PDFPage />, root);
+      const highlights1 = highlightPDFRange(root);
+      const highlights2 = highlightPDFRange(root);
+      const svgLayer = root.querySelector('svg');
+
+      const lastSVGHighlight = highlights =>
+        highlights[highlights.length - 1].svgHighlight;
+
+      setHighlightsFocused(highlights1, true);
+      assert.equal(svgLayer.lastChild, lastSVGHighlight(highlights1));
+
+      setHighlightsFocused(highlights2, true);
+      assert.equal(svgLayer.lastChild, lastSVGHighlight(highlights2));
+    });
+
     it('removes class from PDF highlights when not focused', () => {
       const root = document.createElement('div');
-      render(<PdfPage />, root);
-      const highlights = highlightPdfRange(root);
+      render(<PDFPage />, root);
+      const highlights = highlightPDFRange(root);
 
       setHighlightsFocused(highlights, true);
       setHighlightsFocused(highlights, false);

@@ -1,15 +1,14 @@
-import { bootHypothesisClient, bootSidebarApp } from '../boot';
-import { $imports } from '../boot';
+import { bootHypothesisClient, bootSidebarApp, $imports } from '../boot';
 
-function assetUrl(url) {
+function assetURL(url) {
   return `https://marginal.ly/client/build/${url}`;
 }
 
-describe('bootstrap', function () {
+describe('bootstrap', () => {
   let fakePolyfills;
   let iframe;
 
-  beforeEach(function () {
+  beforeEach(() => {
     iframe = document.createElement('iframe');
     document.body.appendChild(iframe);
 
@@ -22,7 +21,7 @@ describe('bootstrap', function () {
     });
   });
 
-  afterEach(function () {
+  afterEach(() => {
     $imports.$restore();
     iframe.remove();
   });
@@ -35,6 +34,7 @@ describe('bootstrap', function () {
       // Annotation layer
       'scripts/annotator.bundle.js',
       'styles/annotator.css',
+      'styles/highlights.css',
       'styles/pdfjs-overrides.css',
 
       // Sidebar app
@@ -47,7 +47,7 @@ describe('bootstrap', function () {
       'styles/sidebar.css',
     ];
 
-    const manifest = assetNames.reduce(function (manifest, path) {
+    const manifest = assetNames.reduce((manifest, path) => {
       const url = path.replace(/\.([a-z]+)$/, '.1234.$1');
       manifest[path] = url;
       return manifest;
@@ -73,32 +73,82 @@ describe('bootstrap', function () {
   function findAssets(doc_) {
     const scripts = Array.from(
       doc_.querySelectorAll('script[data-hypothesis-asset]')
-    ).map(function (el) {
-      return el.src;
+    ).map(el => {
+      return { src: el.src, type: el.type === 'module' ? 'module' : 'script' };
     });
 
     const styles = Array.from(
       doc_.querySelectorAll('link[rel="stylesheet"][data-hypothesis-asset]')
-    ).map(function (el) {
-      return el.href;
+    ).map(el => {
+      return { src: el.href, type: 'stylesheet' };
     });
 
-    return scripts.concat(styles).sort();
+    return scripts.concat(styles).sort((a, b) => a.src.localeCompare(b.src));
   }
 
-  describe('bootHypothesisClient', function () {
-    it('loads assets for the annotation layer', function () {
+  describe('bootHypothesisClient', () => {
+    let clock;
+
+    beforeEach(() => {
+      clock = sinon.useFakeTimers();
+    });
+
+    afterEach(() => {
+      clock.restore();
+    });
+
+    it('loads assets for the annotation layer', () => {
+      clock.tick(123); // Set timestamp used by module cache-busting fragment.
+
       runBoot('annotator');
       const expectedAssets = [
-        'scripts/annotator.bundle.1234.js',
-        'styles/annotator.1234.css',
-        'styles/pdfjs-overrides.1234.css',
-      ].map(assetUrl);
+        { src: assetURL('scripts/annotator.bundle.1234.js'), type: 'script' },
+        { src: assetURL('styles/highlights.1234.css'), type: 'stylesheet' },
+      ];
 
       assert.deepEqual(findAssets(iframe.contentDocument), expectedAssets);
     });
 
-    it('creates the link to the sidebar iframe', function () {
+    it('loads styling overrides in PDF.js', () => {
+      clock.tick(123); // Set timestamp used by module cache-busting fragment.
+
+      window.PDFViewerApplication = {};
+      try {
+        runBoot('annotator');
+        const expectedAssets = [
+          { src: assetURL('scripts/annotator.bundle.1234.js'), type: 'script' },
+          { src: assetURL('styles/highlights.1234.css'), type: 'stylesheet' },
+          {
+            src: assetURL('styles/pdfjs-overrides.1234.css'),
+            type: 'stylesheet',
+          },
+        ];
+
+        assert.deepEqual(findAssets(iframe.contentDocument), expectedAssets);
+      } finally {
+        delete window.PDFViewerApplication;
+      }
+    });
+
+    it('preloads assets used wihin shadow roots in the annotation layer', () => {
+      runBoot('annotator');
+
+      const preloadLinks = [
+        ...iframe.contentDocument.querySelectorAll('link[rel=preload]'),
+      ];
+      preloadLinks.sort((a, b) => a.href.localeCompare(b.href));
+
+      assert.equal(preloadLinks.length, 1);
+
+      assert.equal(
+        preloadLinks[0].href,
+        'https://marginal.ly/client/build/styles/annotator.1234.css'
+      );
+      assert.equal(preloadLinks[0].as, 'style');
+      assert.equal(preloadLinks[0].crossOrigin, null);
+    });
+
+    it('creates the link to the sidebar iframe', () => {
       runBoot('annotator');
 
       const sidebarAppLink = iframe.contentDocument.querySelector(
@@ -109,7 +159,7 @@ describe('bootstrap', function () {
       assert.equal(sidebarAppLink.href, 'https://marginal.ly/app.html');
     });
 
-    it('does nothing if Hypothesis is already loaded in the document', function () {
+    it('does nothing if Hypothesis is already loaded in the document', () => {
       const link = iframe.contentDocument.createElement('link');
       link.type = 'application/annotator+html';
       iframe.contentDocument.head.appendChild(link);
@@ -127,26 +177,26 @@ describe('bootstrap', function () {
       runBoot('annotator');
 
       const polyfillsLoaded = findAssets(iframe.contentDocument).filter(a =>
-        a.match(/polyfills/)
+        a.src.match(/polyfills/)
       );
       assert.called(fakePolyfills.requiredPolyfillSets);
       assert.deepEqual(polyfillsLoaded, [
-        assetUrl('scripts/polyfills-es2017.bundle.1234.js'),
+        {
+          src: assetURL('scripts/polyfills-es2017.bundle.1234.js'),
+          type: 'script',
+        },
       ]);
     });
   });
 
-  describe('bootSidebarApp', function () {
-    it('loads assets for the sidebar application', function () {
+  describe('bootSidebarApp', () => {
+    it('loads assets for the sidebar application', () => {
       runBoot('sidebar');
       const expectedAssets = [
-        'scripts/katex.bundle.1234.js',
-        'scripts/sentry.bundle.1234.js',
-        'scripts/showdown.bundle.1234.js',
-        'scripts/sidebar.bundle.1234.js',
-        'styles/katex.min.1234.css',
-        'styles/sidebar.1234.css',
-      ].map(assetUrl);
+        { src: assetURL('scripts/sidebar.bundle.1234.js'), type: 'module' },
+        { src: assetURL('styles/katex.min.1234.css'), type: 'stylesheet' },
+        { src: assetURL('styles/sidebar.1234.css'), type: 'stylesheet' },
+      ];
 
       assert.deepEqual(findAssets(iframe.contentDocument), expectedAssets);
     });
@@ -178,11 +228,14 @@ describe('bootstrap', function () {
       runBoot('sidebar');
 
       const polyfillsLoaded = findAssets(iframe.contentDocument).filter(a =>
-        a.match(/polyfills/)
+        a.src.match(/polyfills/)
       );
       assert.called(fakePolyfills.requiredPolyfillSets);
       assert.deepEqual(polyfillsLoaded, [
-        assetUrl('scripts/polyfills-es2017.bundle.1234.js'),
+        {
+          src: assetURL('scripts/polyfills-es2017.bundle.1234.js'),
+          type: 'module',
+        },
       ]);
     });
   });

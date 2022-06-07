@@ -1,11 +1,11 @@
+import { Link } from '@hypothesis/frontend-shared';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 
-import { format as formatDate } from '../../util/date';
-import { decayingInterval, toFuzzyString } from '../../util/time';
-
-/**
- * @typedef {import("../../../types/api").Annotation} Annotation
- */
+import {
+  decayingInterval,
+  formatRelativeDate,
+  formatDate,
+} from '../../util/time';
 
 /**
  * @typedef AnnotationTimestampsProps
@@ -34,9 +34,10 @@ export default function AnnotationTimestamps({
 }) {
   // "Current" time, used when calculating the relative age of `timestamp`.
   const [now, setNow] = useState(() => new Date());
-  const createdDate = useMemo(() => new Date(annotationCreated), [
-    annotationCreated,
-  ]);
+  const createdDate = useMemo(
+    () => new Date(annotationCreated),
+    [annotationCreated]
+  );
   const updatedDate = useMemo(
     () => withEditedTimestamp && new Date(annotationUpdated),
     [annotationUpdated, withEditedTimestamp]
@@ -45,7 +46,7 @@ export default function AnnotationTimestamps({
   const created = useMemo(() => {
     return {
       absolute: formatDate(createdDate),
-      relative: toFuzzyString(createdDate, now),
+      relative: formatRelativeDate(createdDate, now),
     };
   }, [createdDate, now]);
 
@@ -55,7 +56,7 @@ export default function AnnotationTimestamps({
     }
     return {
       absolute: formatDate(updatedDate),
-      relative: toFuzzyString(updatedDate, now),
+      relative: formatRelativeDate(updatedDate, now),
     };
   }, [updatedDate, now]);
 
@@ -77,28 +78,29 @@ export default function AnnotationTimestamps({
       : 'edited';
 
   return (
-    <div className="AnnotationTimestamps">
+    <div>
       {withEditedTimestamp && (
         <span
-          className="AnnotationTimestamps__timestamp AnnotationTimestamps__edited"
+          className="text-color-text-light text-sm italic"
+          data-testid="timestamp-edited"
           title={updated.absolute}
         >
           ({editedString}){' '}
         </span>
       )}
       {annotationUrl ? (
-        <a
-          className="AnnotationTimestamps__timestamp AnnotationTimestamps__timestamp--linked"
+        <Link
+          classes="p-muted-link"
           target="_blank"
-          rel="noopener noreferrer"
           title={created.absolute}
           href={annotationUrl}
         >
           {created.relative}
-        </a>
+        </Link>
       ) : (
         <span
-          className="AnnotationTimestamps__timestamp AnnotationTimestamps__created"
+          className="color-text-color-light"
+          data-testid="timestamp-created"
           title={created.absolute}
         >
           {created.relative}

@@ -3,6 +3,7 @@ import * as fixtures from '../../test/annotation-fixtures';
 import { AnnotationsService, $imports } from '../annotations';
 
 describe('AnnotationsService', () => {
+  let fakeAnnotationActivity;
   let fakeApi;
   let fakeMetadata;
   let fakeStore;
@@ -13,7 +14,18 @@ describe('AnnotationsService', () => {
 
   let svc;
 
+  function setLoggedIn(loggedIn) {
+    const profile = loggedIn
+      ? { userid: 'acct:foo@bar.com', user_info: {} }
+      : { userid: null };
+    fakeStore.profile.returns(profile);
+    fakeStore.isLoggedIn.returns(loggedIn);
+  }
+
   beforeEach(() => {
+    fakeAnnotationActivity = {
+      reportActivity: sinon.stub(),
+    };
     fakeApi = {
       annotation: {
         create: sinon.stub().resolves(fixtures.defaultAnnotation()),
@@ -30,7 +42,7 @@ describe('AnnotationsService', () => {
     fakeMetadata = {
       isAnnotation: sinon.stub(),
       isHighlight: sinon.stub(),
-      isNew: sinon.stub(),
+      isSaved: sinon.stub(),
       isPageNote: sinon.stub(),
       isPublic: sinon.stub(),
     };
@@ -55,6 +67,8 @@ describe('AnnotationsService', () => {
       updateFlagStatus: sinon.stub(),
     };
 
+    setLoggedIn(true);
+
     $imports.$mock({
       '../helpers/annotation-metadata': fakeMetadata,
       '../helpers/permissions': {
@@ -64,7 +78,7 @@ describe('AnnotationsService', () => {
       },
     });
 
-    svc = new AnnotationsService(fakeApi, fakeStore);
+    svc = new AnnotationsService(fakeAnnotationActivity, fakeApi, fakeStore);
   });
 
   afterEach(() => {
@@ -86,10 +100,6 @@ describe('AnnotationsService', () => {
       now = new Date();
 
       fakeStore.focusedGroupId.returns('mygroup');
-      fakeStore.profile.returns({
-        userid: 'acct:foo@bar.com',
-        user_info: {},
-      });
     });
 
     it('extends the provided annotation object with defaults', () => {
@@ -228,6 +238,14 @@ describe('AnnotationsService', () => {
       assert.calledWith(fakeStore.setExpanded, 'yetanotherancestor', true);
     });
 
+    it('throws if the user is not logged in', () => {
+      setLoggedIn(false);
+
+      assert.throws(() => {
+        svc.create(fixtures.newAnnotation(), now);
+      }, 'Cannot create annotation when logged out');
+    });
+
     it('throws an error if there is no focused group', () => {
       fakeStore.focusedGroupId.returns(null);
 
@@ -239,7 +257,7 @@ describe('AnnotationsService', () => {
 
   describe('createPageNote', () => {
     it('should open the login-prompt panel if the user is not logged in', () => {
-      fakeStore.isLoggedIn.returns(false);
+      setLoggedIn(false);
 
       svc.createPageNote();
 
@@ -286,6 +304,13 @@ describe('AnnotationsService', () => {
       await assert.rejects(svc.delete(annot), 'Annotation does not exist');
       assert.notCalled(fakeStore.removeAnnotations);
     });
+
+    it('reports delete-annotation activity', async () => {
+      const annot = fixtures.defaultAnnotation();
+      await svc.delete(annot);
+      assert.calledOnce(fakeAnnotationActivity.reportActivity);
+      assert.calledWith(fakeAnnotationActivity.reportActivity, 'delete', annot);
+    });
   });
 
   describe('flag', () => {
@@ -307,6 +332,13 @@ describe('AnnotationsService', () => {
 
       await assert.rejects(svc.flag(annot), 'Annotation does not exist');
       assert.notCalled(fakeStore.updateFlagStatus);
+    });
+
+    it('reports flag-annotation activity', async () => {
+      const annot = fixtures.defaultAnnotation();
+      await svc.flag(annot);
+      assert.calledOnce(fakeAnnotationActivity.reportActivity);
+      assert.calledWith(fakeAnnotationActivity.reportActivity, 'flag', annot);
     });
   });
 
@@ -370,7 +402,7 @@ describe('AnnotationsService', () => {
 
   describe('save', () => {
     it('calls the `create` API service for new annotations', () => {
-      fakeMetadata.isNew.returns(true);
+      fakeMetadata.isSaved.returns(false);
       // Using the new-annotation fixture has no bearing on which API method
       // will get called because `isNew` is mocked, but it has representative
       // properties
@@ -383,8 +415,21 @@ describe('AnnotationsService', () => {
       });
     });
 
+    it('reports create-annotation activity for new annotations', async () => {
+      fakeMetadata.isSaved.returns(false);
+      const annotation = fixtures.newAnnotation();
+
+      const savedAnnotation = await svc.save(annotation);
+      assert.calledOnce(fakeAnnotationActivity.reportActivity);
+      assert.calledWith(
+        fakeAnnotationActivity.reportActivity,
+        'create',
+        savedAnnotation
+      );
+    });
+
     it('calls the `update` API service for pre-existing annotations', () => {
-      fakeMetadata.isNew.returns(false);
+      fakeMetadata.isSaved.returns(true);
 
       const annotation = fixtures.defaultAnnotation();
       return svc.save(annotation).then(() => {
@@ -395,8 +440,21 @@ describe('AnnotationsService', () => {
       });
     });
 
+    it('reports update-annotation activity for pre-existing annotations', async () => {
+      fakeMetadata.isSaved.returns(true);
+      const annotation = fixtures.defaultAnnotation();
+
+      const savedAnnotation = await svc.save(annotation);
+      assert.calledOnce(fakeAnnotationActivity.reportActivity);
+      assert.calledWith(
+        fakeAnnotationActivity.reportActivity,
+        'update',
+        savedAnnotation
+      );
+    });
+
     it('calls the relevant API service with an object that has any draft changes integrated', () => {
-      fakeMetadata.isNew.returns(true);
+      fakeMetadata.isSaved.returns(false);
       fakePrivatePermissions.returns({ read: ['foo'] });
       const annotation = fixtures.defaultAnnotation();
       annotation.text = 'not this';
@@ -410,8 +468,8 @@ describe('AnnotationsService', () => {
       });
 
       return svc.save(fixtures.defaultAnnotation()).then(() => {
-        const annotationWithChanges = fakeApi.annotation.create.getCall(0)
-          .args[1];
+        const annotationWithChanges =
+          fakeApi.annotation.create.getCall(0).args[1];
         assert.equal(annotationWithChanges.text, 'my text');
         assert.sameMembers(annotationWithChanges.tags, ['one', 'two']);
         // Permissions converted to "private"
@@ -424,7 +482,7 @@ describe('AnnotationsService', () => {
 
     context('successful save', () => {
       it('copies over internal app-specific keys to the annotation object', () => {
-        fakeMetadata.isNew.returns(false);
+        fakeMetadata.isSaved.returns(true);
         const annotation = fixtures.defaultAnnotation();
         annotation.$tag = 'mytag';
         annotation.$foo = 'bar';
@@ -433,8 +491,8 @@ describe('AnnotationsService', () => {
         fakeApi.annotation.update.resolves(fixtures.defaultAnnotation());
 
         return svc.save(annotation).then(() => {
-          const savedAnnotation = fakeStore.addAnnotations.getCall(0)
-            .args[0][0];
+          const savedAnnotation =
+            fakeStore.addAnnotations.getCall(0).args[0][0];
           assert.equal(savedAnnotation.$tag, 'mytag');
           assert.equal(savedAnnotation.$foo, 'bar');
         });
@@ -450,7 +508,7 @@ describe('AnnotationsService', () => {
 
       it('adds the updated annotation to the store', () => {
         const annotation = fixtures.defaultAnnotation();
-        fakeMetadata.isNew.returns(false);
+        fakeMetadata.isSaved.returns(true);
         fakeApi.annotation.update.resolves(annotation);
 
         return svc.save(annotation).then(() => {
@@ -462,7 +520,7 @@ describe('AnnotationsService', () => {
     context('error on save', () => {
       it('removes the active save request from the store', () => {
         fakeApi.annotation.update.rejects();
-        fakeMetadata.isNew.returns(false);
+        fakeMetadata.isSaved.returns(true);
 
         return svc.save(fixtures.defaultAnnotation()).catch(() => {
           assert.notCalled(fakeStore.removeDraft);
@@ -472,7 +530,7 @@ describe('AnnotationsService', () => {
 
       it('does not remove the annotation draft', () => {
         fakeApi.annotation.update.rejects();
-        fakeMetadata.isNew.returns(false);
+        fakeMetadata.isSaved.returns(true);
 
         return svc.save(fixtures.defaultAnnotation()).catch(() => {
           assert.notCalled(fakeStore.removeDraft);
@@ -481,7 +539,7 @@ describe('AnnotationsService', () => {
 
       it('does not add the annotation to the store', () => {
         fakeApi.annotation.update.rejects();
-        fakeMetadata.isNew.returns(false);
+        fakeMetadata.isSaved.returns(true);
 
         return svc.save(fixtures.defaultAnnotation()).catch(() => {
           assert.notCalled(fakeStore.addAnnotations);

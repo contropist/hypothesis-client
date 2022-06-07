@@ -1,6 +1,4 @@
-import { storeModule } from '../create-store';
-
-import * as util from '../util';
+import { createStoreModule, makeAction } from '../create-store';
 
 /**
  * @typedef ToastMessage
@@ -9,6 +7,7 @@ import * as util from '../util';
  * @prop {string} message
  * @prop {string} moreInfoURL
  * @prop {boolean} isDismissed
+ * @prop {boolean} visuallyHidden
  */
 
 /**
@@ -16,27 +15,41 @@ import * as util from '../util';
  * maintains state only; it's up to other layers to handle the management
  * and interactions with these messages.
  */
-function init() {
-  return {
-    messages: [],
-  };
-}
 
-const update = {
-  ADD_MESSAGE: function (state, action) {
+const initialState = {
+  /** @type {ToastMessage[]} */
+  messages: [],
+};
+
+/** @typedef {typeof initialState} State */
+
+const reducers = {
+  /**
+   * @param {State} state
+   * @param {{ message: ToastMessage }} action
+   */
+  ADD_MESSAGE(state, action) {
     return {
       messages: state.messages.concat({ ...action.message }),
     };
   },
 
-  REMOVE_MESSAGE: function (state, action) {
+  /**
+   * @param {State} state
+   * @param {{ id: string }} action
+   */
+  REMOVE_MESSAGE(state, action) {
     const updatedMessages = state.messages.filter(
       message => message.id !== action.id
     );
     return { messages: updatedMessages };
   },
 
-  UPDATE_MESSAGE: function (state, action) {
+  /**
+   * @param {State} state
+   * @param {{ message: ToastMessage }} action
+   */
+  UPDATE_MESSAGE(state, action) {
     const updatedMessages = state.messages.map(message => {
       if (message.id && message.id === action.message.id) {
         return { ...action.message };
@@ -47,15 +60,13 @@ const update = {
   },
 };
 
-const actions = util.actionTypes(update);
-
 /** Actions */
 
 /**
  * @param {ToastMessage} message
  */
 function addMessage(message) {
-  return { type: actions.ADD_MESSAGE, message };
+  return makeAction(reducers, 'ADD_MESSAGE', { message });
 }
 
 /**
@@ -64,7 +75,7 @@ function addMessage(message) {
  * @param {string} id
  */
 function removeMessage(id) {
-  return { type: actions.REMOVE_MESSAGE, id };
+  return makeAction(reducers, 'REMOVE_MESSAGE', { id });
 }
 
 /**
@@ -73,7 +84,7 @@ function removeMessage(id) {
  * @param {ToastMessage} message
  */
 function updateMessage(message) {
-  return { type: actions.UPDATE_MESSAGE, message };
+  return makeAction(reducers, 'UPDATE_MESSAGE', { message });
 }
 
 /** Selectors */
@@ -81,8 +92,8 @@ function updateMessage(message) {
 /**
  * Retrieve a message by `id`
  *
+ * @param {State} state
  * @param {string} id
- * @return {Object|undefined}
  */
 function getMessage(state, id) {
   return state.messages.find(message => message.id === id);
@@ -91,7 +102,7 @@ function getMessage(state, id) {
 /**
  * Retrieve all current messages
  *
- * @return {Object[]}
+ * @param {State} state
  */
 function getMessages(state) {
   return state.messages;
@@ -102,9 +113,9 @@ function getMessages(state) {
  * text exists in the state's collection of messages. This matches messages
  * by content, not by ID (true uniqueness).
  *
+ * @param {State} state
  * @param {string} type
  * @param {string} text
- * @return {boolean}
  */
 function hasMessage(state, type, text) {
   return state.messages.some(message => {
@@ -112,11 +123,10 @@ function hasMessage(state, type, text) {
   });
 }
 
-export default storeModule({
-  init,
+export const toastMessagesModule = createStoreModule(initialState, {
   namespace: 'toastMessages',
-  update,
-  actions: {
+  reducers,
+  actionCreators: {
     addToastMessage: addMessage,
     removeToastMessage: removeMessage,
     updateToastMessage: updateMessage,

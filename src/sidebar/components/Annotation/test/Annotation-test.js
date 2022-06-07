@@ -3,15 +3,14 @@ import { mount } from 'enzyme';
 import * as fixtures from '../../../test/annotation-fixtures';
 
 import { checkAccessibility } from '../../../../test-util/accessibility';
-import mockImportedComponents from '../../../../test-util/mock-imported-components';
+import { mockImportedComponents } from '../../../../test-util/mock-imported-components';
 
 import Annotation, { $imports } from '../Annotation';
 
 describe('Annotation', () => {
-  let fakeOnToggleReplies;
-
   // Dependency Mocks
   let fakeMetadata;
+  let fakeAnnotationUser;
 
   // Injected dependency mocks
   let fakeAnnotationsService;
@@ -31,9 +30,7 @@ describe('Annotation', () => {
       <Annotation
         annotation={fixtures.defaultAnnotation()}
         annotationsService={fakeAnnotationsService}
-        hasAppliedFilter={false}
         isReply={false}
-        onToggleReplies={fakeOnToggleReplies}
         replyCount={0}
         threadIsCollapsed={true}
         {...props}
@@ -42,14 +39,17 @@ describe('Annotation', () => {
   };
 
   beforeEach(() => {
-    fakeOnToggleReplies = sinon.stub();
-
     fakeAnnotationsService = {
       reply: sinon.stub(),
       save: sinon.stub().resolves(),
     };
 
+    fakeAnnotationUser = {
+      annotationDisplayName: sinon.stub().returns('Richard Lionheart'),
+    };
+
     fakeMetadata = {
+      annotationRole: sinon.stub().returns('Annotation'),
       quote: sinon.stub(),
     };
 
@@ -64,7 +64,8 @@ describe('Annotation', () => {
     $imports.$mock(mockImportedComponents());
     $imports.$mock({
       '../../helpers/annotation-metadata': fakeMetadata,
-      '../../store/use-store': { useStoreProxy: () => fakeStore },
+      '../../helpers/annotation-user': fakeAnnotationUser,
+      '../../store': { useSidebarStore: () => fakeStore },
     });
   });
 
@@ -72,31 +73,14 @@ describe('Annotation', () => {
     $imports.$restore();
   });
 
-  describe('annotation classnames', () => {
-    it('should assign a reply class if the annotation is a reply', () => {
-      const wrapper = createComponent({
-        isReply: true,
-        threadIsCollapsed: false,
-      });
-      const annot = wrapper.find('.Annotation');
+  describe('annotation accessibility (ARIA) attributes', () => {
+    it('should add an `aria-label` composed of annotation type and author name', () => {
+      const wrapper = createComponent();
 
-      assert.isTrue(annot.hasClass('Annotation--reply'));
-      assert.isFalse(annot.hasClass('is-collapsed'));
-    });
-
-    it('applies a focused class if annotation is focused', () => {
-      fakeStore.isAnnotationFocused.returns(true);
-      const wrapper = createComponent({ threadIsCollapsed: false });
-      const annot = wrapper.find('.Annotation');
-
-      assert.isTrue(annot.hasClass('is-focused'));
-    });
-
-    it('should assign a collapsed class if the annotation thread is collapsed', () => {
-      const wrapper = createComponent({ threadIsCollapsed: true });
-      const annot = wrapper.find('.Annotation');
-
-      assert.isTrue(annot.hasClass('is-collapsed'));
+      assert.equal(
+        wrapper.find('article').props()['aria-label'],
+        'Annotation by Richard Lionheart'
+      );
     });
   });
 
@@ -132,12 +116,17 @@ describe('Annotation', () => {
 
     const wrapper = createComponent();
 
-    assert.include(wrapper.find('.Annotation__actions').text(), 'Saving...');
+    assert.include(
+      wrapper.find('[data-testid="saving-message"]').text(),
+      'Saving...'
+    );
   });
 
   describe('reply thread toggle', () => {
-    it('should render a toggle button if the annotation has replies', () => {
+    it('should render a toggle button if provided with a toggle callback', () => {
+      const fakeOnToggleReplies = sinon.stub();
       const wrapper = createComponent({
+        onToggleReplies: fakeOnToggleReplies,
         replyCount: 5,
         threadIsCollapsed: true,
       });
@@ -150,30 +139,8 @@ describe('Annotation', () => {
       assert.equal(toggle.props().threadIsCollapsed, true);
     });
 
-    it('should not render a reply toggle if the annotation has no replies', () => {
+    it('should not render a reply toggle if no toggle callback provided', () => {
       const wrapper = createComponent({
-        isReply: false,
-        replyCount: 0,
-        threadIsCollapsed: true,
-      });
-
-      assert.isFalse(wrapper.find('AnnotationReplyToggle').exists());
-    });
-
-    it('should not render a reply toggle if there are applied filters', () => {
-      const wrapper = createComponent({
-        hasAppliedFilter: true,
-        isReply: false,
-        replyCount: 5,
-        threadIsCollapsed: true,
-      });
-
-      assert.isFalse(wrapper.find('AnnotationReplyToggle').exists());
-    });
-
-    it('should not render a reply toggle if the annotation itself is a reply', () => {
-      const wrapper = createComponent({
-        isReply: true,
         replyCount: 5,
         threadIsCollapsed: true,
       });
@@ -245,52 +212,6 @@ describe('Annotation', () => {
 
         assert.isTrue(wrapper.find('AnnotationBody').exists());
         assert.isTrue(wrapper.find('footer').exists());
-      });
-    });
-
-    context('missing annotation', () => {
-      it('should render a message about annotation unavailability', () => {
-        const wrapper = createComponent({ annotation: undefined });
-
-        assert.equal(wrapper.text(), 'Message not available.');
-      });
-
-      it('should not render a message if collapsed reply', () => {
-        const wrapper = createComponent({
-          annotation: undefined,
-          isReply: true,
-          threadIsCollapsed: true,
-        });
-
-        assert.equal(wrapper.text(), '');
-      });
-
-      it('should render reply toggle controls if there are replies', () => {
-        const wrapper = createComponent({
-          annotation: undefined,
-          replyCount: 5,
-          threadIsCollapsed: true,
-        });
-
-        const toggle = wrapper.find('AnnotationReplyToggle');
-
-        assert.isTrue(toggle.exists());
-        assert.equal(toggle.props().onToggleReplies, fakeOnToggleReplies);
-        assert.equal(toggle.props().replyCount, 5);
-        assert.equal(toggle.props().threadIsCollapsed, true);
-      });
-
-      it('should not render reply toggle controls if collapsed reply', () => {
-        const wrapper = createComponent({
-          annotation: undefined,
-          isReply: true,
-          replyCount: 5,
-          threadIsCollapsed: true,
-        });
-
-        const toggle = wrapper.find('AnnotationReplyToggle');
-
-        assert.isFalse(toggle.exists());
       });
     });
   });

@@ -1,19 +1,20 @@
+import { Card } from '@hypothesis/frontend-shared';
 import classnames from 'classnames';
 import debounce from 'lodash.debounce';
 import { useCallback, useMemo } from 'preact/hooks';
 
-import { useStoreProxy } from '../store/use-store';
+import { useSidebarStore } from '../store';
 import { withServices } from '../service-context';
 
 import Thread from './Thread';
 
 /**
- * @typedef {import('../../types/config').MergedConfig} MergedConfig
+ * @typedef {import('../../types/config').SidebarSettings} SidebarSettings
  */
 
 /**
  * @typedef ThreadCardProps
- * @prop {Thread} thread
+ * @prop {import('../helpers/build-thread').Thread} thread
  * @prop {import('../services/frame-sync').FrameSyncService} frameSync
  */
 
@@ -24,19 +25,24 @@ import Thread from './Thread';
  * @param {ThreadCardProps} props
  */
 function ThreadCard({ frameSync, thread }) {
-  const store = useStoreProxy();
-  const threadTag = thread.annotation && thread.annotation.$tag;
-  const isFocused = store.isAnnotationFocused(threadTag);
+  const store = useSidebarStore();
+  const threadTag = thread.annotation?.$tag ?? null;
+  const isFocused = threadTag && store.isAnnotationFocused(threadTag);
   const focusThreadAnnotation = useMemo(
     () =>
-      debounce(tag => {
-        const focusTags = tag ? [tag] : [];
-        frameSync.focusAnnotations(focusTags);
-      }, 10),
+      debounce(
+        /** @param {string|null} tag */
+        tag => {
+          const focusTags = tag ? [tag] : [];
+          frameSync.focusAnnotations(focusTags);
+        },
+        10
+      ),
     [frameSync]
   );
 
   const scrollToAnnotation = useCallback(
+    /** @param {string} tag */
     tag => {
       frameSync.scrollToAnnotation(tag);
     },
@@ -59,26 +65,28 @@ function ThreadCard({ frameSync, thread }) {
 
   return (
     /* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */
-    <div
+    <Card
+      classes={classnames('p-3 cursor-pointer', {
+        'is-focused': isFocused,
+      })}
+      data-testid="thread-card"
       onClick={e => {
         // Prevent click events intended for another action from
         // triggering a page scroll.
-        if (!isFromButtonOrLink(/** @type {Element} */ (e.target))) {
+        if (
+          !isFromButtonOrLink(/** @type {Element} */ (e.target)) &&
+          threadTag
+        ) {
           scrollToAnnotation(threadTag);
         }
       }}
-      onMouseEnter={() => focusThreadAnnotation(threadTag)}
+      onMouseEnter={() => focusThreadAnnotation(threadTag ?? null)}
       onMouseLeave={() => focusThreadAnnotation(null)}
       key={thread.id}
-      className={classnames('ThreadCard', {
-        'is-focused': isFocused,
-      })}
     >
       {threadContent}
-    </div>
+    </Card>
   );
 }
 
-ThreadCard.injectedProps = ['frameSync'];
-
-export default withServices(ThreadCard);
+export default withServices(ThreadCard, ['frameSync']);

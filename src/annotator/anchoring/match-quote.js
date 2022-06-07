@@ -53,10 +53,13 @@ function search(text, str, maxErrors) {
  * @param {string} str
  */
 function textMatchScore(text, str) {
-  /* istanbul ignore next - `scoreMatch` will never pass an empty string */
-  if (str.length === 0) {
+  // `search` will return no matches if either the text or pattern is empty,
+  // otherwise it will return at least one match if the max allowed error count
+  // is at least `str.length`.
+  if (str.length === 0 || text.length === 0) {
     return 0.0;
   }
+
   const matches = search(text, str, str.length);
 
   // prettier-ignore
@@ -70,7 +73,7 @@ function textMatchScore(text, str) {
  *
  * @param {string} text - Document text to search
  * @param {string} quote - String to find within `text`
- * @param {Object} context -
+ * @param {object} context -
  *   Context in which the quote originally appeared. This is used to choose the
  *   best match.
  *   @param {string} [context.prefix] - Expected text before the quote
@@ -116,7 +119,10 @@ export function matchQuote(text, quote, context = {}) {
 
     const prefixScore = context.prefix
       ? textMatchScore(
-          text.slice(match.start - context.prefix.length, match.start),
+          text.slice(
+            Math.max(0, match.start - context.prefix.length),
+            match.start
+          ),
           context.prefix
         )
       : 1.0;

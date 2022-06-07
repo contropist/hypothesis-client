@@ -28,6 +28,9 @@ node {
     // S3 bucket where the embedded client is served from.
     s3Bucket = "cdn.hypothes.is"
 
+    // URL where the embedded client will be served from.
+    cdnURL = "https://${s3Bucket}/hypothesis"
+
     // Pre-release suffix added to new package version number when deploying,
     // eg. "testing".
     //
@@ -108,6 +111,7 @@ node {
             nodeEnv.inside("-e HOME=${workspace}") {
                 withCredentials([
                     string(credentialsId: 'npm-token', variable: 'NPM_TOKEN'),
+                    string(credentialsId: 'sentry-token', variable: 'SENTRY_AUTH_TOKEN'),
                     usernamePassword(credentialsId: 'github-jenkins-user',
                                      passwordVariable: 'GITHUB_TOKEN_NOT_USED',
                                      usernameVariable: 'GITHUB_USERNAME'),
@@ -125,6 +129,8 @@ node {
                     export NOTEBOOK_APP_URL=https://qa.hypothes.is/notebook
                     yarn version --no-git-tag-version --new-version ${qaVersion}
                     """
+
+                    uploadFilesToSentry(cdnURL, qaVersion)
 
                     // Deploy to S3, so the package can be served by
                     // https://qa.hypothes.is/embed.js.
@@ -169,6 +175,7 @@ stage('Publish') {
             nodeEnv.inside("-e HOME=${workspace} -e BRANCH_NAME=${env.BRANCH_NAME}") {
                 withCredentials([
                     string(credentialsId: 'npm-token', variable: 'NPM_TOKEN'),
+                    string(credentialsId: 'sentry-token', variable: 'SENTRY_AUTH_TOKEN'),
                     usernamePassword(credentialsId: 'github-jenkins-user',
                                       passwordVariable: 'GITHUB_TOKEN',
                                       usernameVariable: 'GITHUB_USERNAME'),
@@ -189,13 +196,17 @@ stage('Publish') {
                     sh "git push https://github.com/hypothesis/client.git v${newPkgVersion}"
                     sh "sleep 2" // Give GitHub a moment to realize the tag exists.
 
-                    // Bump the package version and create the GitHub release.
+                    // Bump the package version.
                     sh """
                     export SIDEBAR_APP_URL=https://hypothes.is/app.html
                     export NOTEBOOK_APP_URL=https://hypothes.is/notebook
                     yarn version --no-git-tag-version --new-version ${newPkgVersion}
                     """
-                    sh "scripts/create-github-release.js"
+
+                    uploadFilesToSentry(cdnURL, newPkgVersion)
+
+                    // Create GitHub release with changes since previous release.
+                    sh "scripts/create-github-release.js v${pkgVersion}"
 
                     sh "echo '//registry.npmjs.org/:_authToken=${env.NPM_TOKEN}' >> \$HOME/.npmrc"
                     sh "yarn publish --no-interactive --tag ${npmTag} --new-version=${newPkgVersion}"
@@ -235,4 +246,17 @@ String bumpMinorVersion(String version) {
     def newMinorVersion = parts[1].toInteger() + 1
 
     return "${parts[0]}.${newMinorVersion}.${parts[2]}"
+}
+
+// Upload the source files and sourcemaps for a new release to Sentry.
+//
+// See https://docs.sentry.io/product/cli/releases/#sentry-cli-sourcemaps.
+void uploadFilesToSentry(String cdnURL, String version) {
+  def sentryCmd = "yarn run sentry-cli releases --org hypothesis --project client"
+
+  sh """
+${sentryCmd} new ${version}
+${sentryCmd} files ${version} upload-sourcemaps --url-prefix ${cdnURL}/${version}/build/scripts/ build/scripts/
+${sentryCmd} finalize ${version}
+"""
 }
